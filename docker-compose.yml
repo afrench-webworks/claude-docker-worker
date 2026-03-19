@@ -1,0 +1,23 @@
+services:
+  claude-docker-worker:
+    build: .
+    container_name: claude-docker-worker
+    restart: always
+    ports:
+      - "127.0.0.1:41922:22"   # Localhost only — not exposed to LAN
+    environment:
+      - SSH_AUTHORIZED_KEY=${SSH_AUTHORIZED_KEY:-}
+      - TZ=America/Chicago
+    volumes:
+      - claude-config:/root/.claude          # Claude Code auth tokens + config
+      - gh-config:/root/.config/gh           # GitHub CLI credentials
+      - ssh-host-keys:/etc/ssh               # SSH host keys (stable fingerprint across rebuilds)
+      - ssh-authorized-keys:/root/.ssh       # Authorized public keys
+      - workspace:/root/workspace            # Persistent project workspace
+
+volumes:
+  claude-config:
+  gh-config:
+  ssh-host-keys:
+  ssh-authorized-keys:
+  workspace:

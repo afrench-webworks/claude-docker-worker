@@ -1,0 +1,4 @@
+entrypoint.sh text eol=lf
+scripts/*.sh text eol=lf
+crontab text eol=lf
+config.yaml text eol=lf

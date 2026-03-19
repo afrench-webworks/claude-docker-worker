@@ -1,0 +1,10 @@
+# Token keep-alive — every 6 hours, triggers OAuth refresh before expiry
+0 */6 * * * /bin/bash -l -c 'claude --model opus -p "ping" > /dev/null 2>&1'
+
+# Comment monitor — every 5 minutes, 24/7
+*/5 * * * * /bin/bash -l -c '/opt/issue-worker/comment-monitor.sh' >> /root/workspace/.issue-worker/logs/cron.log 2>&1
+
+# Issue worker — every 30 minutes, midnight to 7:30 AM CST
+# Cron runs in America/Chicago timezone (set in Dockerfile)
+*/30 0-7 * * * /bin/bash -l -c '/opt/issue-worker/issue-worker.sh' >> /root/workspace/.issue-worker/logs/cron.log 2>&1
+

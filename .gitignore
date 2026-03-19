@@ -1,0 +1,9 @@
+# Machine-specific config (use config.yaml.example as template)
+config.yaml
+
+# Private keys
+*.pem
+
+# OS files
+.DS_Store
+Thumbs.db

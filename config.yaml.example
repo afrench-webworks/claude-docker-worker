@@ -1,0 +1,9 @@
+repos:
+  - owner/repo-name
+  # - org/another-repo
+
+label: claude-task                 # Issues must have this label to be picked up by the issue worker
+mention: "@dockworker"             # Comment monitor only responds to comments containing this mention
+bot_signature: "— 🚢 Claude Dockworker"
+git_bot_name: "claude-docker-worker"
+git_bot_email: "claude-docker-worker@noreply.github.com"
