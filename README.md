@@ -1,5 +1,9 @@
 # Claude Docker Worker
 
+<p align="center">
+  <img src="claude-dockworker.png" alt="Claude Dockworker" width="400">
+</p>
+
 An always-on Docker container that autonomously works GitHub Issues using Claude Code (Opus). It responds to `@dockworker` mentions with repo-aware analysis, implements changes, opens pull requests, and addresses review feedback — all without human intervention.
 
 ## How It Works
