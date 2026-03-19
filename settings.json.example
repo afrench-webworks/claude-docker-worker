@@ -18,10 +18,9 @@
       "Bash(npx *)",
       "Bash(node *)",
       "Bash(which *)",
-      "Bash(echo *)"
-    ],
-    "deny": [
+      "Bash(echo *)",
       "Bash(gh *)"
-    ]
+    ],
+    "deny": []
   }
 }

@@ -69,27 +69,7 @@ mark_mention_handled() {
 }
 
 # ---------------------------------------------------------------------------
-# post_reply — append signature and post to an issue or PR
-# ---------------------------------------------------------------------------
-post_reply() {
-    local number="$1"
-    local repo="$2"
-    local reply="$3"
-
-    local full_reply="${reply}
-
-${BOT_SIGNATURE}"
-
-    echo "$full_reply" | gh issue comment "$number" -R "$repo" -F - || {
-        echo "[$(date -Iseconds)] ERROR: Failed to post comment on $repo#$number"
-        return 1
-    }
-    echo "[$(date -Iseconds)] Posted reply to $repo#$number"
-}
-
-# ---------------------------------------------------------------------------
-# respond_on_branch — checkout PR branch, run Claude, commit if changes made
-# Sets $reply
+# respond_on_branch — checkout PR branch, run Claude, let Claude commit/push/reply
 # ---------------------------------------------------------------------------
 respond_on_branch() {
     local repo="$1"
@@ -115,9 +95,9 @@ respond_on_branch() {
     }
     git pull --rebase origin "$branch_name" 2>/dev/null || true
 
-    reply=$(claude --model opus -p "You are an automated assistant responding to a mention in a GitHub pull request.
+    claude --model opus -p "You are an automated assistant responding to a mention in a GitHub pull request.
 You are inside the repository's working directory on the PR branch.
-You have full access to read files, explore the codebase, and make small edits.
+You have full access to read files, explore the codebase, and make edits.
 
 Repository: $repo
 Issue #$issue_number / PR #$pr_number
@@ -128,26 +108,20 @@ $full_context
 Instructions:
 1. Read the comment that mentioned you carefully.
 2. Explore relevant files in the repository to give an informed response.
-3. If the comment requests small code changes or adjustments, go ahead and make them.
+3. If the comment requests code changes or adjustments, go ahead and make them.
 4. If the comment asks a question about the code, look at the actual files and give
    a specific, grounded answer.
-5. Write a response summarizing what you found or did. Reference specific files and
-   lines when relevant." 2>&1) || {
+5. If you made any file changes, stage, commit, and push them to the current branch.
+   Use commit message: \"address feedback on issue #$issue_number\"
+   Add Co-Authored-By: Claude <noreply@anthropic.com> to each commit.
+6. When done, post a reply on the PR using:
+   gh issue comment $pr_number -R $repo -F - <<< \"\$YOUR_REPLY\"
+   End every reply with this signature on its own line: $BOT_SIGNATURE" 2>&1 || {
         echo "[$(date -Iseconds)] ERROR: Claude failed for $repo PR #$pr_number"
         cd - > /dev/null
         release_repo_lock
         return 1
     }
-
-    if ! git diff --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
-        echo "[$(date -Iseconds)] Claude made changes — committing and pushing"
-        git add -A
-        git commit -m "address feedback on issue #$issue_number
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
-        git push origin HEAD
-        reply="$reply"$'\n\n'"Changes have been pushed to the existing PR."
-    fi
 
     local _default_branch
     _default_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
@@ -171,7 +145,7 @@ respond_readonly() {
     ensure_repo_clone "$repo" || return 1
 
     cd "$repo_dir"
-    reply=$(claude --model opus -p "You are an automated assistant responding to a mention on GitHub.
+    claude --model opus -p "You are an automated assistant responding to a mention on GitHub.
 You are inside the repository's working directory and can read any files for context.
 
 Repository: $repo
@@ -184,7 +158,10 @@ Instructions:
 1. Read the comment that mentioned you carefully.
 2. Explore relevant files in the repository to give an informed response.
 3. Reference specific files, functions, and code when answering.
-4. Write a concise, grounded response based on what you find in the actual codebase." 2>&1) || {
+4. Write a concise, grounded response based on what you find in the actual codebase.
+5. When done, post your reply on the issue/PR using:
+   gh issue comment $number -R $repo -F - <<< \"\$YOUR_REPLY\"
+   End every reply with this signature on its own line: $BOT_SIGNATURE" 2>&1 || {
         echo "[$(date -Iseconds)] ERROR: Claude failed for $repo#$number"
         cd - > /dev/null
         return 1
@@ -248,9 +225,7 @@ for repo in "${REPOS[@]}"; do
             review_ctx=$(echo "$review_comments" | jq '[.[] | {author: .user, path, line, body}]')
             full_context=$(echo "$full_context" | jq --argjson rc "$review_ctx" '. + {review_comments: $rc}')
 
-            reply=""
             if respond_on_branch "$repo" "$issue_number" "$pr_number" "$full_context" "$branch_name"; then
-                post_reply "$pr_number" "$repo" "$reply"
                 mark_mention_handled "$rc_id"
             fi
             exit 0
@@ -279,9 +254,7 @@ for repo in "${REPOS[@]}"; do
             full_context=$(echo "$full_context" | jq --arg rs "$rv_state" --arg rb "$rv_body" \
                 '. + {latest_review: {state: $rs, body: $rb}}')
 
-            reply=""
             if respond_on_branch "$repo" "$issue_number" "$pr_number" "$full_context" "$branch_name"; then
-                post_reply "$pr_number" "$repo" "$reply"
                 mark_mention_handled "$rv_id"
             fi
             exit 0
@@ -308,9 +281,7 @@ for repo in "${REPOS[@]}"; do
             pr_conv=$(echo "$pr_comments" | jq '[.[] | {author: .user, body}]')
             full_context=$(echo "$full_context" | jq --argjson pc "$pr_conv" '. + {pr_comments: $pc}')
 
-            reply=""
             if respond_on_branch "$repo" "$issue_number" "$pr_number" "$full_context" "$branch_name"; then
-                post_reply "$pr_number" "$repo" "$reply"
                 mark_mention_handled "$pc_id"
             fi
             exit 0
@@ -347,7 +318,6 @@ for repo in "${REPOS[@]}"; do
 
             # Check if there's an associated PR we can work on
             pr_status=$(read_state_field "$PROCESSED_ISSUES_FILE" "${repo}#${issue_number}" "status")
-            reply=""
 
             if [[ "$pr_status" == "pr-opened" ]]; then
                 branch_name="claude/issue-${issue_number}"
@@ -358,7 +328,6 @@ for repo in "${REPOS[@]}"; do
                 respond_readonly "$repo" "$issue_number" "$full_context" || continue
             fi
 
-            post_reply "$issue_number" "$repo" "$reply"
             mark_mention_handled "$c_id"
             exit 0
         done
@@ -375,10 +344,8 @@ for repo in "${REPOS[@]}"; do
             full_context=$(gh issue view "$issue_number" -R "$repo" --json title,body,comments \
                 --jq '{title, body, comments: [.comments[] | {author: .author.login, body}]}' 2>/dev/null) || continue
 
-            reply=""
             respond_readonly "$repo" "$issue_number" "$full_context" || continue
 
-            post_reply "$issue_number" "$repo" "$reply"
             mark_mention_handled "$body_key"
             exit 0
         fi

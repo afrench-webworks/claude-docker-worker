@@ -124,7 +124,7 @@ Adjust the port and key path to match your setup.
 docker cp settings.json.example claude-docker-worker:/root/.claude/settings.json
 ```
 
-This configures which tools Claude Code can use in non-interactive mode. Notably, `Bash(gh *)` is denied to prevent Claude from posting duplicate comments — the automation scripts handle all GitHub interaction.
+This configures which tools Claude Code can use in non-interactive mode. Claude handles its own GitHub commenting via `gh`, so `Bash(gh *)` is in the allow list.
 
 ### 6. Authenticate Claude Code
 
@@ -256,7 +256,7 @@ The container binds to `127.0.0.1:41922` by default (localhost only, not exposed
 
 **Claude Code can't use tools:** Verify `/root/.claude/settings.json` has the permissions allowlist. Claude Code in `-p` (print) mode blocks tool use by default.
 
-**Duplicate comments:** Ensure `Bash(gh *)` is in the deny list in `settings.json`. Without this, Claude may post comments directly in addition to the script posting them.
+**Duplicate comments:** Claude posts its own replies via `gh`. The automation scripts no longer post comments for the comment monitor — only Claude does. If you see duplicates, check that an older version of the scripts isn't running.
 
 **Git push fails:** Run `gh auth setup-git` inside the container. The entrypoint runs this on boot, but it requires `gh auth login` to have been completed first.
 
