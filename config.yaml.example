@@ -10,3 +10,7 @@ mention: "@dockworker"             # Comment monitor only responds to comments c
 bot_signature: "— 🚢 Claude Dockworker"
 git_bot_name: "claude-docker-worker"
 git_bot_email: "claude-docker-worker@noreply.github.com"
+
+# GitHub App identity (optional — omit to post as your personal account)
+# Installations are auto-discovered — just install the app on your accounts/orgs.
+# app_id: "12345"

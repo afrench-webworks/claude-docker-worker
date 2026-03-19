@@ -52,6 +52,7 @@ claude-docker-worker/
 └── scripts/
     ├── common.sh            # Shared utilities (config, state, locking, logging)
     ├── comment-monitor.sh   # Mention-driven response loop
+    ├── github-app-token.sh  # GitHub App JWT auth with auto-discovery
     └── issue-worker.sh      # Issue implementation and PR creation loop
 ```
 
@@ -237,6 +238,7 @@ No need to re-inject SSH keys or re-authenticate — all credentials live in nam
 | `bot_signature` | Appended to every comment posted by the bot |
 | `git_bot_name` | Git committer name for automated commits |
 | `git_bot_email` | Git committer email for automated commits |
+| `app_id` | *(Optional)* GitHub App ID — enables posting as a bot identity instead of your personal account. Installations are auto-discovered at runtime. |
 
 ### Cron Schedule
 

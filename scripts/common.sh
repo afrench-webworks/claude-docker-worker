@@ -22,6 +22,7 @@ MENTION=""
 BOT_SIGNATURE=""
 GIT_BOT_NAME=""
 GIT_BOT_EMAIL=""
+APP_ID=""
 
 # Helper to parse a scalar value from config.yaml
 _parse_config_value() {
@@ -69,6 +70,15 @@ load_config() {
         echo "[ERROR] No authorized_users configured in $CONFIG_FILE"
         return 1
     fi
+
+    # GitHub App config (optional — falls back to gh CLI auth if not set)
+    APP_ID=$(_parse_config_value "app_id")
+
+    # Source the token script and discover installations
+    source "$SCRIPT_DIR/github-app-token.sh"
+    init_app_auth "$APP_ID" || {
+        echo "[WARN] GitHub App init failed, falling back to gh CLI auth"
+    }
 
     # Config loaded silently — only errors are logged
 }

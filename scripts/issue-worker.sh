@@ -69,6 +69,7 @@ processed_one=false
 
 for repo in "${REPOS[@]}"; do
     if $processed_one; then break; fi
+    set_app_token_for_repo "$repo"
 
     # Get open issues with the trigger label
     issues_json=$(gh issue list -R "$repo" --label "$LABEL" --state open \

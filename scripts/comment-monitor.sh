@@ -213,6 +213,7 @@ find_pr_branch() {
 # ===========================================================================
 
 for repo in "${REPOS[@]}"; do
+    set_app_token_for_repo "$repo"
 
     # -------------------------------------------------------------------
     # 1. PR review comments (inline code comments on diffs)

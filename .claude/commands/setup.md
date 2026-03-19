@@ -18,6 +18,7 @@ Check if `config.yaml` exists in the project root. If not:
 
 - Copy `config.yaml.example` to `config.yaml`
 - Ask the user which GitHub repos to monitor (format: `owner/repo`)
+- Ask the user for their GitHub username(s) to add to `authorized_users`
 - Ask if they want to change the trigger label (default: `claude-task`)
 - Ask if they want to change the mention handle (default: `@dockworker`)
 - Ask if they want to change the bot signature (default: `— 🚢 Claude Dockworker`)
@@ -84,7 +85,74 @@ then run `gh auth setup-git` to configure git credential forwarding.
 
 Wait for the user to confirm they've completed this step.
 
-## 11. Final Verification
+## 11. (Optional) Set Up GitHub App Identity
+
+Ask the user if they want the bot to post comments under its own GitHub App identity
+instead of their personal account. If yes, walk through the following:
+
+### 11a. Create the GitHub App
+
+Tell the user to go to https://github.com/settings/apps/new and fill in:
+
+- **App name:** Suggest `{username}-dockworker` (e.g., `jsmith-dockworker`)
+- **Homepage URL:** Can be anything (e.g., their GitHub profile URL)
+- **Webhook:** Uncheck "Active" (we poll, no webhooks needed)
+- **Permissions:**
+  - Repository > Contents: Read & write
+  - Repository > Issues: Read & write
+  - Repository > Pull requests: Read & write
+  - Repository > Metadata: Read-only (auto-selected)
+- **Where can this app be installed?** "Only on this account"
+
+Click "Create GitHub App." Wait for user to confirm.
+
+### 11b. Record the App ID
+
+Ask the user for the **App ID** shown on the app's settings page after creation.
+
+### 11c. Generate a Private Key
+
+Tell the user to click "Generate a private key" on the app settings page.
+A `.pem` file will download. Ask the user for the file path.
+
+Copy the key into the container on the persistent volume:
+
+```
+docker cp /path/to/key.pem claude-docker-worker:/root/.claude/github-app-key.pem
+ssh claude-docker-worker "chmod 600 /root/.claude/github-app-key.pem"
+```
+
+### 11d. Install the App
+
+Tell the user to go to the "Install App" tab in their app settings and install
+it on their account. They can choose "All repositories" or select specific ones.
+
+Wait for user to confirm.
+
+### 11e. Update config.yaml
+
+Add the `app_id` field to the project's `config.yaml`:
+
+```yaml
+app_id: "12345"
+```
+
+Installations are auto-discovered at runtime — no need to specify an installation ID.
+If the app is installed on multiple accounts or orgs, it will automatically use the
+correct installation for each repo.
+
+### 11f. Rebuild
+
+Rebuild the container so the updated config is baked in:
+
+```
+docker compose down && docker compose build && docker compose up -d
+```
+
+Tell the user that comments will now be posted under the app's identity.
+If the app is installed on an org, the bot can post as itself on org repos too.
+
+## 12. Final Verification
 
 SSH into the container and verify everything is working:
 
@@ -97,6 +165,6 @@ Report the results and confirm the setup is complete. Remind the user that:
 
 - The container runs with `restart: always` and survives reboots
 - Claude Code auth tokens may expire after 30 days of inactivity
-- The comment monitor runs every 5 minutes and responds to `@dockworker` mentions
+- The comment monitor runs every 5 minutes and responds to mentions from authorized users only
 - The issue worker runs midnight–8AM and picks up issues labeled with their trigger label
 - They can test with `ssh claude-docker-worker` then `/opt/issue-worker/comment-monitor.sh`
