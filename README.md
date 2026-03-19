@@ -231,6 +231,7 @@ No need to re-inject SSH keys or re-authenticate — all credentials live in nam
 | Key | Description |
 |---|---|
 | `repos` | List of `owner/repo` strings to monitor |
+| `authorized_users` | GitHub usernames allowed to trigger the bot via mentions |
 | `label` | GitHub label that triggers the issue worker (e.g., `claude-task`) |
 | `mention` | Handle that triggers the comment monitor (e.g., `@dockworker`) |
 | `bot_signature` | Appended to every comment posted by the bot |

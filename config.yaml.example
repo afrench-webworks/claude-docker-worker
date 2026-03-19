@@ -2,6 +2,9 @@ repos:
   - owner/repo-name
   # - org/another-repo
 
+authorized_users:
+  - your-github-username           # Only respond to mentions from these users
+
 label: claude-task                 # Issues must have this label to be picked up by the issue worker
 mention: "@dockworker"             # Comment monitor only responds to comments containing this mention
 bot_signature: "— 🚢 Claude Dockworker"

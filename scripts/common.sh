@@ -16,6 +16,7 @@ SEEN_COMMENTS_FILE="$STATE_DIR/seen-comments.json"
 # ---------------------------------------------------------------------------
 
 declare -a REPOS=()
+declare -a AUTHORIZED_USERS=()
 LABEL=""
 MENTION=""
 BOT_SIGNATURE=""
@@ -44,6 +45,13 @@ load_config() {
         [[ -n "$repo" ]] && REPOS+=("$repo")
     done < <(grep -A 100 '^repos:' "$CONFIG_FILE" | tail -n +2 | grep '^[[:space:]]*-' | grep -v '^[[:space:]]*#')
 
+    # Parse authorized_users list (same format as repos)
+    AUTHORIZED_USERS=()
+    while IFS= read -r line; do
+        user=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//' | sed 's/[[:space:]]*#.*//')
+        [[ -n "$user" ]] && AUTHORIZED_USERS+=("$user")
+    done < <(grep -A 100 '^authorized_users:' "$CONFIG_FILE" | tail -n +2 | grep '^[[:space:]]*-' | grep -v '^[[:space:]]*#')
+
     LABEL=$(_parse_config_value "label")
     MENTION=$(_parse_config_value "mention")
     BOT_SIGNATURE=$(_parse_config_value "bot_signature")
@@ -55,6 +63,10 @@ load_config() {
     fi
     if [[ -z "$LABEL" ]]; then
         echo "[ERROR] No label configured in $CONFIG_FILE"
+        return 1
+    fi
+    if [[ ${#AUTHORIZED_USERS[@]} -eq 0 ]]; then
+        echo "[ERROR] No authorized_users configured in $CONFIG_FILE"
         return 1
     fi
 
@@ -182,6 +194,15 @@ has_mention() {
     local comment_body="$1"
 
     [[ "$comment_body" == *"$MENTION"* ]]
+}
+
+is_authorized_user() {
+    local username="$1"
+    local user
+    for user in "${AUTHORIZED_USERS[@]}"; do
+        [[ "$user" == "$username" ]] && return 0
+    done
+    return 1
 }
 
 # ---------------------------------------------------------------------------

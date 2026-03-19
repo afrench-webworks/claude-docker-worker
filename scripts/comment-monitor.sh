@@ -233,10 +233,12 @@ for repo in "${REPOS[@]}"; do
         for ri in $(seq 0 $(($(echo "$review_comments" | jq length) - 1))); do
             rc_id=$(echo "$review_comments" | jq -r ".[$ri].id")
             rc_body=$(echo "$review_comments" | jq -r ".[$ri].body")
+            rc_user=$(echo "$review_comments" | jq -r ".[$ri].user")
 
             is_mention_handled "$rc_id" && continue
             ! has_mention "$rc_body" && continue
             is_bot_comment "$rc_body" && { mark_mention_handled "$rc_id"; continue; }
+            ! is_authorized_user "$rc_user" && { mark_mention_handled "$rc_id"; continue; }
 
             echo "[$(date -Iseconds)] @dockworker mention in PR review comment on $repo PR #$pr_number"
 
@@ -261,11 +263,13 @@ for repo in "${REPOS[@]}"; do
             rv_id=$(echo "$reviews" | jq -r ".[$ri].id")
             rv_body=$(echo "$reviews" | jq -r ".[$ri].body")
             rv_state=$(echo "$reviews" | jq -r ".[$ri].state")
+            rv_user=$(echo "$reviews" | jq -r ".[$ri].user")
 
             is_mention_handled "$rv_id" && continue
             [[ -z "$rv_body" || "$rv_body" == "null" ]] && continue
             ! has_mention "$rv_body" && continue
             is_bot_comment "$rv_body" && { mark_mention_handled "$rv_id"; continue; }
+            ! is_authorized_user "$rv_user" && { mark_mention_handled "$rv_id"; continue; }
 
             echo "[$(date -Iseconds)] @dockworker mention in PR review ($rv_state) on $repo PR #$pr_number"
 
@@ -289,10 +293,12 @@ for repo in "${REPOS[@]}"; do
         for ci in $(seq 0 $(($(echo "$pr_comments" | jq length) - 1))); do
             pc_id=$(echo "$pr_comments" | jq -r ".[$ci].id")
             pc_body=$(echo "$pr_comments" | jq -r ".[$ci].body")
+            pc_user=$(echo "$pr_comments" | jq -r ".[$ci].user")
 
             is_mention_handled "$pc_id" && continue
             ! has_mention "$pc_body" && continue
             is_bot_comment "$pc_body" && { mark_mention_handled "$pc_id"; continue; }
+            ! is_authorized_user "$pc_user" && { mark_mention_handled "$pc_id"; continue; }
 
             echo "[$(date -Iseconds)] @dockworker mention in PR conversation on $repo PR #$pr_number"
 
@@ -326,10 +332,12 @@ for repo in "${REPOS[@]}"; do
         for ci in $(seq 0 $(($(echo "$comments_json" | jq length) - 1))); do
             c_id=$(echo "$comments_json" | jq -r ".[$ci].id")
             c_body=$(echo "$comments_json" | jq -r ".[$ci].body")
+            c_user=$(echo "$comments_json" | jq -r ".[$ci].user")
 
             is_mention_handled "$c_id" && continue
             ! has_mention "$c_body" && continue
             is_bot_comment "$c_body" && { mark_mention_handled "$c_id"; continue; }
+            ! is_authorized_user "$c_user" && { mark_mention_handled "$c_id"; continue; }
 
             echo "[$(date -Iseconds)] @dockworker mention on $repo#$issue_number: $issue_title"
 
@@ -355,10 +363,12 @@ for repo in "${REPOS[@]}"; do
         done
 
         # Also check the issue body itself for a mention (first-contact scenario)
-        issue_body=$(gh issue view "$issue_number" -R "$repo" --json body --jq '.body' 2>/dev/null) || continue
+        issue_data=$(gh issue view "$issue_number" -R "$repo" --json body,author --jq '{body, author: .author.login}' 2>/dev/null) || continue
+        issue_body=$(echo "$issue_data" | jq -r '.body')
+        issue_author=$(echo "$issue_data" | jq -r '.author')
         body_key="issue-body-${repo}#${issue_number}"
 
-        if has_mention "$issue_body" && ! is_mention_handled "$body_key"; then
+        if has_mention "$issue_body" && ! is_mention_handled "$body_key" && is_authorized_user "$issue_author"; then
             echo "[$(date -Iseconds)] @dockworker mention in issue body on $repo#$issue_number: $issue_title"
 
             full_context=$(gh issue view "$issue_number" -R "$repo" --json title,body,comments \
