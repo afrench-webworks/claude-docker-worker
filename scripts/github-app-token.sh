@@ -12,7 +12,7 @@
 
 APP_KEY_FILE="/root/.claude/github-app-key.pem"
 TOKEN_CACHE_DIR="/root/.claude/app-token-cache"
-ACTIVE_TOKEN_FILE="/root/.claude/gh-token-env"
+CLAUDE_SETTINGS_FILE="/root/.claude/settings.json"
 
 # Associative array: owner -> installation_id
 declare -A _APP_INSTALLATIONS=()
@@ -116,6 +116,18 @@ _get_installation_token() {
 }
 
 # ---------------------------------------------------------------------------
+# _inject_token_into_settings — Write GH_TOKEN into Claude's settings.json env
+# ---------------------------------------------------------------------------
+_inject_token_into_settings() {
+    local token="$1"
+    if [[ ! -f "$CLAUDE_SETTINGS_FILE" ]]; then
+        return 0
+    fi
+    local tmp="${CLAUDE_SETTINGS_FILE}.tmp"
+    jq --arg t "$token" '.env.GH_TOKEN = $t' "$CLAUDE_SETTINGS_FILE" > "$tmp" && mv "$tmp" "$CLAUDE_SETTINGS_FILE"
+}
+
+# ---------------------------------------------------------------------------
 # set_app_token_for_repo — Set GH_TOKEN for the owner of the given repo.
 # Args: "owner/repo"
 # No-op if the app isn't configured or doesn't have an installation for
@@ -163,8 +175,7 @@ set_app_token_for_repo() {
 
             if [[ $remaining -gt 600 ]]; then
                 export GH_TOKEN="$cached_token"
-                printf '%s' "$cached_token" > "$ACTIVE_TOKEN_FILE"
-                chmod 600 "$ACTIVE_TOKEN_FILE"
+                _inject_token_into_settings "$cached_token"
                 return 0
             fi
         fi
@@ -177,7 +188,6 @@ set_app_token_for_repo() {
         return 1
     }
     export GH_TOKEN="$token"
-    printf '%s' "$token" > "$ACTIVE_TOKEN_FILE"
-    chmod 600 "$ACTIVE_TOKEN_FILE"
+    _inject_token_into_settings "$token"
     return 0
 }
