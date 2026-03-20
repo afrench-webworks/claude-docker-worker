@@ -114,8 +114,9 @@ Instructions:
 5. If you made any file changes, stage, commit, and push them to the current branch.
    Use commit message: \"address feedback on issue #$issue_number\"
    Add Co-Authored-By: Claude <noreply@anthropic.com> to each commit.
-6. When done, post a reply on the PR using:
-   gh issue comment $pr_number -R $repo -F - <<< \"\$YOUR_REPLY\"
+6. When done, post a reply on the PR. You MUST use the bot identity token when posting.
+   Use this exact pattern (the GH_TOKEN prefix is critical):
+   GH_TOKEN=\$(cat /root/.claude/gh-token-env) gh issue comment $pr_number -R $repo --body \"\$YOUR_REPLY\"
    End every reply with this signature on its own line: $BOT_SIGNATURE" 2>&1 || {
         echo "[$(date -Iseconds)] ERROR: Claude failed for $repo PR #$pr_number"
         cd - > /dev/null
@@ -159,8 +160,9 @@ Instructions:
 2. Explore relevant files in the repository to give an informed response.
 3. Reference specific files, functions, and code when answering.
 4. Write a concise, grounded response based on what you find in the actual codebase.
-5. When done, post your reply on the issue/PR using:
-   gh issue comment $number -R $repo -F - <<< \"\$YOUR_REPLY\"
+5. When done, post your reply on the issue/PR. You MUST use the bot identity token when posting.
+   Use this exact pattern (the GH_TOKEN prefix is critical):
+   GH_TOKEN=\$(cat /root/.claude/gh-token-env) gh issue comment $number -R $repo --body \"\$YOUR_REPLY\"
    End every reply with this signature on its own line: $BOT_SIGNATURE" 2>&1 || {
         echo "[$(date -Iseconds)] ERROR: Claude failed for $repo#$number"
         cd - > /dev/null

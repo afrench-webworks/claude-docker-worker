@@ -19,7 +19,9 @@
       "Bash(node *)",
       "Bash(which *)",
       "Bash(echo *)",
-      "Bash(gh *)"
+      "Bash(export *)",
+      "Bash(gh *)",
+      "Bash(GH_TOKEN=* gh *)"
     ],
     "deny": []
   }

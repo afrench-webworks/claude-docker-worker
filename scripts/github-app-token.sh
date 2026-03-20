@@ -12,6 +12,7 @@
 
 APP_KEY_FILE="/root/.claude/github-app-key.pem"
 TOKEN_CACHE_DIR="/root/.claude/app-token-cache"
+ACTIVE_TOKEN_FILE="/root/.claude/gh-token-env"
 
 # Associative array: owner -> installation_id
 declare -A _APP_INSTALLATIONS=()
@@ -162,6 +163,8 @@ set_app_token_for_repo() {
 
             if [[ $remaining -gt 600 ]]; then
                 export GH_TOKEN="$cached_token"
+                printf '%s' "$cached_token" > "$ACTIVE_TOKEN_FILE"
+                chmod 600 "$ACTIVE_TOKEN_FILE"
                 return 0
             fi
         fi
@@ -174,5 +177,7 @@ set_app_token_for_repo() {
         return 1
     }
     export GH_TOKEN="$token"
+    printf '%s' "$token" > "$ACTIVE_TOKEN_FILE"
+    chmod 600 "$ACTIVE_TOKEN_FILE"
     return 0
 }
