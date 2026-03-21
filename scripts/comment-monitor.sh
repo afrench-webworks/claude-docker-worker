@@ -114,7 +114,8 @@ Instructions:
 5. If you made any file changes, stage, commit, and push them to the current branch.
    Use commit message: \"address feedback on issue #$issue_number\"
    Add Co-Authored-By: Claude <noreply@anthropic.com> to each commit.
-6. When done, post a reply on the PR using gh issue comment.
+6. When done, post a reply on PR #$pr_number (NOT issue #$issue_number) using:
+   gh issue comment $pr_number -R $repo --body \"<your reply>\"
    End every reply with this signature on its own line: $BOT_SIGNATURE" 2>&1 || {
         echo "[$(date -Iseconds)] ERROR: Claude failed for $repo PR #$pr_number"
         cd - > /dev/null
@@ -216,16 +217,15 @@ for repo in "${REPOS[@]}"; do
             is_bot_comment "$rc_body" && { mark_mention_handled "$rc_id"; continue; }
             ! is_authorized_user "$rc_user" && { mark_mention_handled "$rc_id"; continue; }
 
-            echo "[$(date -Iseconds)] @dockworker mention in PR review comment on $repo PR #$pr_number"
+            echo "[$(date -Iseconds)] $MENTION mention in PR review comment on $repo PR #$pr_number"
 
             full_context=$(gh issue view "$issue_number" -R "$repo" --json title,body,comments \
                 --jq '{title, body, comments: [.comments[] | {author: .author.login, body}]}' 2>/dev/null) || full_context="{}"
             review_ctx=$(echo "$review_comments" | jq '[.[] | {author: .user, path, line, body}]')
             full_context=$(echo "$full_context" | jq --argjson rc "$review_ctx" '. + {review_comments: $rc}')
 
-            if respond_on_branch "$repo" "$issue_number" "$pr_number" "$full_context" "$branch_name"; then
-                mark_mention_handled "$rc_id"
-            fi
+            respond_on_branch "$repo" "$issue_number" "$pr_number" "$full_context" "$branch_name" || true
+            mark_mention_handled "$rc_id"
             exit 0
         done
 
@@ -245,16 +245,15 @@ for repo in "${REPOS[@]}"; do
             is_bot_comment "$rv_body" && { mark_mention_handled "$rv_id"; continue; }
             ! is_authorized_user "$rv_user" && { mark_mention_handled "$rv_id"; continue; }
 
-            echo "[$(date -Iseconds)] @dockworker mention in PR review ($rv_state) on $repo PR #$pr_number"
+            echo "[$(date -Iseconds)] $MENTION mention in PR review ($rv_state) on $repo PR #$pr_number"
 
             full_context=$(gh issue view "$issue_number" -R "$repo" --json title,body,comments \
                 --jq '{title, body, comments: [.comments[] | {author: .author.login, body}]}' 2>/dev/null) || full_context="{}"
             full_context=$(echo "$full_context" | jq --arg rs "$rv_state" --arg rb "$rv_body" \
                 '. + {latest_review: {state: $rs, body: $rb}}')
 
-            if respond_on_branch "$repo" "$issue_number" "$pr_number" "$full_context" "$branch_name"; then
-                mark_mention_handled "$rv_id"
-            fi
+            respond_on_branch "$repo" "$issue_number" "$pr_number" "$full_context" "$branch_name" || true
+            mark_mention_handled "$rv_id"
             exit 0
         done
 
@@ -272,16 +271,15 @@ for repo in "${REPOS[@]}"; do
             is_bot_comment "$pc_body" && { mark_mention_handled "$pc_id"; continue; }
             ! is_authorized_user "$pc_user" && { mark_mention_handled "$pc_id"; continue; }
 
-            echo "[$(date -Iseconds)] @dockworker mention in PR conversation on $repo PR #$pr_number"
+            echo "[$(date -Iseconds)] $MENTION mention in PR conversation on $repo PR #$pr_number"
 
             full_context=$(gh issue view "$issue_number" -R "$repo" --json title,body,comments \
                 --jq '{title, body, comments: [.comments[] | {author: .author.login, body}]}' 2>/dev/null) || full_context="{}"
             pr_conv=$(echo "$pr_comments" | jq '[.[] | {author: .user, body}]')
             full_context=$(echo "$full_context" | jq --argjson pc "$pr_conv" '. + {pr_comments: $pc}')
 
-            if respond_on_branch "$repo" "$issue_number" "$pr_number" "$full_context" "$branch_name"; then
-                mark_mention_handled "$pc_id"
-            fi
+            respond_on_branch "$repo" "$issue_number" "$pr_number" "$full_context" "$branch_name" || true
+            mark_mention_handled "$pc_id"
             exit 0
         done
     done
@@ -309,7 +307,7 @@ for repo in "${REPOS[@]}"; do
             is_bot_comment "$c_body" && { mark_mention_handled "$c_id"; continue; }
             ! is_authorized_user "$c_user" && { mark_mention_handled "$c_id"; continue; }
 
-            echo "[$(date -Iseconds)] @dockworker mention on $repo#$issue_number: $issue_title"
+            echo "[$(date -Iseconds)] $MENTION mention on $repo#$issue_number: $issue_title"
 
             full_context=$(gh issue view "$issue_number" -R "$repo" --json title,body,comments \
                 --jq '{title, body, comments: [.comments[] | {author: .author.login, body}]}' 2>/dev/null) || continue
@@ -320,10 +318,17 @@ for repo in "${REPOS[@]}"; do
             if [[ "$pr_status" == "pr-opened" ]]; then
                 branch_name="claude/issue-${issue_number}"
                 pr_number=$(read_state_field "$PROCESSED_ISSUES_FILE" "${repo}#${issue_number}" "pr_url" | grep -oP '\d+$')
-                respond_on_branch "$repo" "$issue_number" "${pr_number:-$issue_number}" "$full_context" "$branch_name" || \
-                    respond_readonly "$repo" "$issue_number" "$full_context" || continue
+                if respond_on_branch "$repo" "$issue_number" "${pr_number:-$issue_number}" "$full_context" "$branch_name"; then
+                    # Cross-reference: let the issue commenter know the response is on the PR
+                    gh issue comment "$issue_number" -R "$repo" \
+                        --body "Responded on the linked PR: #${pr_number:-$issue_number}
+
+$BOT_SIGNATURE" 2>/dev/null || true
+                else
+                    respond_readonly "$repo" "$issue_number" "$full_context" || true
+                fi
             else
-                respond_readonly "$repo" "$issue_number" "$full_context" || continue
+                respond_readonly "$repo" "$issue_number" "$full_context" || true
             fi
 
             mark_mention_handled "$c_id"
@@ -337,12 +342,12 @@ for repo in "${REPOS[@]}"; do
         body_key="issue-body-${repo}#${issue_number}"
 
         if has_mention "$issue_body" && ! is_mention_handled "$body_key" && is_authorized_user "$issue_author"; then
-            echo "[$(date -Iseconds)] @dockworker mention in issue body on $repo#$issue_number: $issue_title"
+            echo "[$(date -Iseconds)] $MENTION mention in issue body on $repo#$issue_number: $issue_title"
 
             full_context=$(gh issue view "$issue_number" -R "$repo" --json title,body,comments \
                 --jq '{title, body, comments: [.comments[] | {author: .author.login, body}]}' 2>/dev/null) || continue
 
-            respond_readonly "$repo" "$issue_number" "$full_context" || continue
+            respond_readonly "$repo" "$issue_number" "$full_context" || true
 
             mark_mention_handled "$body_key"
             exit 0

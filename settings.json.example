@@ -14,12 +14,25 @@
       "Bash(tail *)",
       "Bash(wc *)",
       "Bash(mkdir *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(rm *)",
+      "Bash(touch *)",
+      "Bash(chmod *)",
       "Bash(npm *)",
       "Bash(npx *)",
       "Bash(node *)",
+      "Bash(dotnet *)",
+      "Bash(msbuild *)",
       "Bash(which *)",
+      "Bash(where *)",
       "Bash(echo *)",
-      "Bash(gh *)"
+      "Bash(gh *)",
+      "Bash(curl *)",
+      "Bash(python *)",
+      "Bash(pip *)",
+      "Bash(cargo *)",
+      "Bash(rustc *)"
     ],
     "deny": []
   }

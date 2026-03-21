@@ -87,9 +87,9 @@ for repo in "${REPOS[@]}"; do
         issue_body=$(echo "$issues_json" | jq -r ".[$i].body")
         state_key="${repo}#${issue_number}"
 
-        # Skip already processed issues — silent
+        # Skip already processed or terminally failed issues — silent
         status=$(read_state_field "$PROCESSED_ISSUES_FILE" "$state_key" "status")
-        [[ "$status" == "pr-opened" || "$status" == "in-progress" ]] && continue
+        [[ "$status" == "pr-opened" || "$status" == "in-progress" || "$status" == "failed" ]] && continue
 
         # --- From here on, we have real work to do. Start logging. ---
         echo "[$(date -Iseconds)] Processing $repo#$issue_number: $issue_title"
@@ -165,12 +165,16 @@ Instructions:
    changed, and any remaining concerns or open questions. This will be used as
    the pull request description, so format it however you think is most useful." 2>&1) || {
             echo "[$(date -Iseconds)] ERROR: Claude Code invocation failed for $repo#$issue_number"
-            echo "[$(date -Iseconds)] Claude output: $claude_output"
             write_state "$PROCESSED_ISSUES_FILE" "$state_key" \
                 "{\"status\":\"failed\",\"reason\":\"claude-failed\",\"processed_at\":\"$(date -Iseconds)\"}"
-            gh issue comment "$issue_number" -R "$repo" --body "I attempted to work on this issue but encountered an error during implementation. Here's what happened:
+            # Truncate and filter output before posting — avoid leaking tokens or secrets
+            local safe_output
+            safe_output=$(echo "$claude_output" | head -c 2000 | sed -E 's/(ghp_|gho_|github_pat_|ghs_)[A-Za-z0-9_]+/[REDACTED]/g')
+            gh issue comment "$issue_number" -R "$repo" --body "I attempted to work on this issue but encountered an error during implementation. Here's a summary:
 
-$claude_output
+\`\`\`
+$safe_output
+\`\`\`
 
 ${BOT_SIGNATURE}" 2>/dev/null
             cd - > /dev/null
@@ -204,7 +208,8 @@ ${BOT_SIGNATURE}" 2>/dev/null
         # Stage, commit, and push
         echo "[$(date -Iseconds)] Committing and pushing changes"
         git add -A
-        git commit -m "$(cat <<EOF
+        if ! git diff --cached --quiet; then
+            git commit -m "$(cat <<EOF
 fix: address issue #$issue_number — $issue_title
 
 Implemented changes as described in #$issue_number.
@@ -212,6 +217,7 @@ Implemented changes as described in #$issue_number.
 Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
+        fi
 
         git push -u origin "$branch_name" 2>&1 || {
             echo "[$(date -Iseconds)] ERROR: Failed to push branch $branch_name"
