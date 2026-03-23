@@ -7,9 +7,11 @@ STATE_DIR="/root/workspace/.issue-worker/state"
 LOG_DIR="/root/workspace/.issue-worker/logs"
 LOCK_DIR="/root/workspace/.issue-worker/locks"
 WORK_DIR="/root/workspace/.issue-worker/workdir"
+REPO_CACHE_DIR="$WORK_DIR/repos"
 
 PROCESSED_ISSUES_FILE="$STATE_DIR/processed-issues.json"
 SEEN_COMMENTS_FILE="$STATE_DIR/seen-comments.json"
+WIP_FILE="$STATE_DIR/wip.json"
 
 # ---------------------------------------------------------------------------
 # Config loading — lightweight YAML parsing (no external deps beyond grep/sed)
@@ -88,6 +90,12 @@ load_config() {
         return 1
     fi
 
+    # Work window for issue handler (optional, defaults to midnight–8 AM)
+    ISSUE_WORK_WINDOW_START=$(_parse_config_value "issue_work_window_start")
+    [[ -z "$ISSUE_WORK_WINDOW_START" ]] && ISSUE_WORK_WINDOW_START=0
+    ISSUE_WORK_WINDOW_END=$(_parse_config_value "issue_work_window_end")
+    [[ -z "$ISSUE_WORK_WINDOW_END" ]] && ISSUE_WORK_WINDOW_END=8
+
     # GitHub App config (optional — falls back to gh CLI auth if not set)
     APP_ID=$(_parse_config_value "app_id")
 
@@ -101,7 +109,106 @@ load_config() {
 }
 
 # ---------------------------------------------------------------------------
-# Locking — prevents overlapping runs of the same script
+# Repo clone management — unified clone with optional fresh fetch
+# ---------------------------------------------------------------------------
+
+# ensure_repo_clone — clone once, optionally fetch+reset on subsequent runs.
+# Sets global $repo_dir to the path of the clone.
+#   ensure_repo_clone "owner/repo"        — reuse existing clone as-is
+#   ensure_repo_clone "owner/repo" true   — fetch origin and reset to default branch
+ensure_repo_clone() {
+    local repo="$1"
+    local fresh="${2:-false}"
+    local dir_name
+    dir_name="$(echo "$repo" | tr '/' '-')"
+    repo_dir="$REPO_CACHE_DIR/$dir_name"
+
+    if [[ -d "$repo_dir/.git" ]]; then
+        if [[ "$fresh" == "true" ]]; then
+            cd "$repo_dir"
+            git fetch origin 2>&1 || {
+                echo "[$(date -Iseconds)] ERROR: Failed to fetch $repo"
+                cd - > /dev/null
+                return 1
+            }
+
+            local default_branch
+            default_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+            [[ -z "$default_branch" ]] && default_branch="main"
+
+            git checkout "$default_branch" 2>/dev/null || git checkout -b "$default_branch" "origin/$default_branch" 2>/dev/null
+            git reset --hard "origin/$default_branch" 2>/dev/null
+            git clean -fd 2>/dev/null
+            cd - > /dev/null
+        fi
+    else
+        mkdir -p "$REPO_CACHE_DIR"
+        echo "[$(date -Iseconds)] Cloning $repo (first time)"
+        rm -rf "$repo_dir"
+        gh repo clone "$repo" "$repo_dir" 2>&1 || {
+            echo "[$(date -Iseconds)] ERROR: Failed to clone $repo"
+            return 1
+        }
+    fi
+
+    cd "$repo_dir"
+    git config user.name "$GIT_BOT_NAME"
+    git config user.email "$GIT_BOT_EMAIL"
+    cd - > /dev/null
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# WIP tracking — per-repo work-in-progress state across cron cycles
+# ---------------------------------------------------------------------------
+
+WIP_LOCK_FD=202
+
+is_repo_wip() {
+    local repo="$1"
+    [[ ! -f "$WIP_FILE" ]] && return 1
+
+    local started_at
+    started_at=$(jq -r --arg r "$repo" '.[$r].started_at // empty' "$WIP_FILE" 2>/dev/null)
+    [[ -n "$started_at" ]]
+}
+
+set_repo_wip() {
+    local repo="$1"
+    local task_type="$2"
+    [[ ! -f "$WIP_FILE" ]] && echo '{}' > "$WIP_FILE"
+
+    local tmp="${WIP_FILE}.tmp"
+    jq --arg r "$repo" --arg t "$task_type" --arg s "$(date -Iseconds)" \
+        '.[$r] = {task_type: $t, started_at: $s}' "$WIP_FILE" > "$tmp" && mv "$tmp" "$WIP_FILE"
+}
+
+clear_repo_wip() {
+    local repo="$1"
+    [[ ! -f "$WIP_FILE" ]] && return 0
+
+    local tmp="${WIP_FILE}.tmp"
+    jq --arg r "$repo" 'del(.[$r])' "$WIP_FILE" > "$tmp" && mv "$tmp" "$WIP_FILE"
+}
+
+# Atomic check-and-set: returns 0 if repo was claimed, 1 if already WIP.
+try_claim_repo() {
+    local repo="$1"
+    local task_type="$2"
+
+    (
+        eval "exec $WIP_LOCK_FD>\"$LOCK_DIR/wip.lock\""
+        flock $WIP_LOCK_FD
+
+        if is_repo_wip "$repo"; then
+            exit 1
+        fi
+        set_repo_wip "$repo" "$task_type"
+    )
+}
+
+# ---------------------------------------------------------------------------
+# Locking — prevents overlapping runs and repo contention
 # ---------------------------------------------------------------------------
 
 LOCK_FD=200
@@ -118,7 +225,7 @@ acquire_lock() {
     fi
 }
 
-# Acquire a per-repo lock to prevent comment-monitor and issue-worker
+# Acquire a per-repo lock to prevent concurrent worker processes
 # from touching the same repo clone simultaneously.
 # Non-blocking — returns 1 if another process holds the lock.
 acquire_repo_lock() {
@@ -237,7 +344,8 @@ is_authorized_user() {
 # ---------------------------------------------------------------------------
 
 ensure_dirs() {
-    mkdir -p "$STATE_DIR" "$LOG_DIR" "$LOCK_DIR" "$WORK_DIR"
+    mkdir -p "$STATE_DIR" "$LOG_DIR" "$LOCK_DIR" "$WORK_DIR" "$REPO_CACHE_DIR"
     [[ -f "$PROCESSED_ISSUES_FILE" ]] || echo '{}' > "$PROCESSED_ISSUES_FILE"
     [[ -f "$SEEN_COMMENTS_FILE" ]] || echo '{}' > "$SEEN_COMMENTS_FILE"
+    [[ -f "$WIP_FILE" ]] || echo '{}' > "$WIP_FILE"
 }

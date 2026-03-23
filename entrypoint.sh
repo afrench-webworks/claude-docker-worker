@@ -22,8 +22,9 @@ mkdir -p /root/workspace/.issue-worker/workdir
 [ -f /root/workspace/.issue-worker/state/processed-issues.json ] || echo '{}' > /root/workspace/.issue-worker/state/processed-issues.json
 [ -f /root/workspace/.issue-worker/state/seen-comments.json ] || echo '{}' > /root/workspace/.issue-worker/state/seen-comments.json
 
-# Clear stale lock files from previous runs/crashes
+# Clear stale lock files and WIP state from previous runs/crashes
 rm -f /root/workspace/.issue-worker/locks/*.lock
+rm -f /root/workspace/.issue-worker/state/wip.json
 
 # Rotate logs — delete log files older than 30 days
 find /root/workspace/.issue-worker/logs -name "*.log" -mtime +30 -delete 2>/dev/null || true

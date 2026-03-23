@@ -11,6 +11,11 @@ bot_signature: "— 🚢 Claude Dockworker"
 git_bot_name: "claude-docker-worker"
 git_bot_email: "claude-docker-worker@noreply.github.com"
 
+# Issue worker time window — hours (24h format, container timezone)
+# Issues are only picked up during this window. Mentions run 24/7.
+# issue_work_window_start: 0
+# issue_work_window_end: 8
+
 # GitHub App identity (optional — omit to post as your personal account)
 # Installations are auto-discovered — just install the app on your accounts/orgs.
 # app_id: "12345"

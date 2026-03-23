@@ -1,56 +1,21 @@
 #!/bin/bash
-# comment-monitor.sh — Responds to mentions in GitHub issues and PRs.
-# Runs every 5 minutes via cron. Silent when there are no mentions to handle.
-# Processes ONE mention per cycle for quality responses.
+# handlers/mentions.sh — Mention response handler for the unified worker.
+# Scans GitHub issues and PRs for unhandled @mentions, then dispatches
+# to branch-edit or read-only response mode.
 #
-# Collects all unhandled mentions across every comment source (issue comments,
-# issue bodies, PR conversations, PR review comments, PR review summaries),
-# filters them, then dispatches to one of two response modes:
-#
-#   - On a PR with a branch → checks out branch, can make edits + push
-#   - On an issue (no branch) → read-only copy, analysis only
+# Handler interface:
+#   handler_mentions_priority   — 10 (higher priority than issues)
+#   handler_mentions_find_work  — returns first actionable mention as JSON
+#   handler_mentions_execute    — builds context, invokes Claude, marks handled
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROMPT_DIR="$SCRIPT_DIR/prompts"
-source "$SCRIPT_DIR/common.sh"
-
-setup_logging "comment-monitor"
-ensure_dirs
-acquire_lock "comment-monitor" || exit 0
-load_config
-
-REPO_CACHE_DIR="$WORK_DIR/repos"
 HANDLED_MENTIONS_FILE="$STATE_DIR/handled-mentions.json"
 [[ -f "$HANDLED_MENTIONS_FILE" ]] || echo '{}' > "$HANDLED_MENTIONS_FILE"
 
-# Clean up stale readonly temp dirs (older than 1 hour)
-find "$WORK_DIR" -maxdepth 1 -name "readonly-*" -type d -mmin +60 -exec rm -rf {} \; 2>/dev/null
+# ---------------------------------------------------------------------------
+# State tracking
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# ensure_repo_clone — reuse from issue-worker's shared clone
-# ---------------------------------------------------------------------------
-ensure_repo_clone() {
-    local repo="$1"
-    local dir_name
-    dir_name="$(echo "$repo" | tr '/' '-')"
-    repo_dir="$REPO_CACHE_DIR/$dir_name"
-
-    if [[ -d "$repo_dir/.git" ]]; then
-        return 0
-    else
-        mkdir -p "$REPO_CACHE_DIR"
-        echo "[$(date -Iseconds)] Cloning $repo (first time from comment-monitor)"
-        gh repo clone "$repo" "$repo_dir" 2>&1 || {
-            echo "[$(date -Iseconds)] ERROR: Failed to clone $repo"
-            return 1
-        }
-    fi
-    return 0
-}
-
-# ---------------------------------------------------------------------------
-# is_mention_handled / mark_mention_handled — state tracking
-# ---------------------------------------------------------------------------
 is_mention_handled() {
     local comment_id="$1"
     local result
@@ -77,7 +42,6 @@ render_prompt() {
     local prompt
     prompt=$(<"$template_file")
 
-    # Use parameter expansion for simple substitutions, heredoc for context
     prompt="${prompt//\{\{repo\}\}/$repo}"
     prompt="${prompt//\{\{number\}\}/$number}"
     prompt="${prompt//\{\{branch\}\}/$branch}"
@@ -99,7 +63,7 @@ respond_on_branch() {
     ensure_repo_clone "$repo" || return 1
 
     if ! acquire_repo_lock "$repo"; then
-        echo "[$(date -Iseconds)] Repo $repo locked by issue-worker, will retry next cycle"
+        echo "[$(date -Iseconds)] Repo $repo locked, will retry next cycle"
         return 1
     fi
 
@@ -143,7 +107,6 @@ respond_readonly() {
 
     ensure_repo_clone "$repo" || return 1
 
-    # Create a gitless copy so Claude structurally cannot commit anywhere
     local dir_name
     dir_name="$(echo "$repo" | tr '/' '-')"
     local readonly_workdir="$WORK_DIR/readonly-${dir_name}-$$"
@@ -168,7 +131,7 @@ respond_readonly() {
 }
 
 # ---------------------------------------------------------------------------
-# collect_mentions — gather all unhandled mentions from a repo into a JSON array
+# collect_mentions — gather all unhandled mentions from a repo
 # ---------------------------------------------------------------------------
 collect_mentions() {
     local repo="$1"
@@ -271,13 +234,11 @@ build_context() {
             context=$(gh pr view "$number" -R "$repo" --json title,body,comments \
                 --jq '{title, body, comments: [.comments[] | {author: .author.login, body}]}' 2>/dev/null) || context="{}"
 
-            # Include all inline review comments
             local review_comments
             review_comments=$(gh api "repos/${repo}/pulls/${number}/comments" \
                 --jq 'map({author: .user.login, path, line: .line, body})' 2>/dev/null) || review_comments="[]"
             context=$(echo "$context" | jq --argjson rc "$review_comments" '. + {review_comments: $rc}')
 
-            # Include latest review state
             local latest_review
             latest_review=$(gh api "repos/${repo}/pulls/${number}/reviews" \
                 --jq '[.[] | select(.body != null and .body != "")] | sort_by(.submitted_at) | last // empty' 2>/dev/null) || latest_review=""
@@ -285,7 +246,6 @@ build_context() {
                 context=$(echo "$context" | jq --argjson lr "$latest_review" \
                     '. + {latest_review: {state: $lr.state, body: $lr.body}}')
 
-                # If this is a review mention, fetch that review's inline comments
                 if [[ "$source" == "pr-review" && -n "$review_id" ]]; then
                     local review_inline
                     review_inline=$(gh api "repos/${repo}/pulls/${number}/reviews/${review_id}/comments" \
@@ -299,7 +259,6 @@ build_context() {
             context=$(gh issue view "$number" -R "$repo" --json title,body,comments \
                 --jq '{title, body, comments: [.comments[] | {author: .author.login, body}]}' 2>/dev/null) || context="{}"
 
-            # Check if there's an associated PR we can reference
             local pr_status
             pr_status=$(read_state_field "$PROCESSED_ISSUES_FILE" "${repo}#${number}" "status")
             if [[ "$pr_status" == "pr-opened" ]]; then
@@ -314,23 +273,24 @@ build_context() {
 }
 
 # ===========================================================================
-# Main loop: collect mentions, filter, dispatch
+# Handler interface
 # ===========================================================================
 
-for repo in "${REPOS[@]}"; do
-    set_app_token_for_repo "$repo"
+handler_mentions_priority=10
 
+handler_mentions_find_work() {
+    local repo="$1"
+    local mentions
     mentions=$(collect_mentions "$repo")
-    mention_count=$(echo "$mentions" | jq length 2>/dev/null) || mention_count=0
 
-    for mi in $(seq 0 $((mention_count - 1))); do
+    local count
+    count=$(echo "$mentions" | jq length 2>/dev/null) || count=0
+
+    for mi in $(seq 0 $((count - 1))); do
+        local m_id m_body m_user
         m_id=$(echo "$mentions" | jq -r ".[$mi].id")
         m_body=$(echo "$mentions" | jq -r ".[$mi].body")
         m_user=$(echo "$mentions" | jq -r ".[$mi].user")
-        m_source=$(echo "$mentions" | jq -r ".[$mi].source")
-        m_number=$(echo "$mentions" | jq -r ".[$mi].number")
-        m_branch=$(echo "$mentions" | jq -r ".[$mi].pr_branch")
-        m_review_id=$(echo "$mentions" | jq -r ".[$mi].review_id // empty")
 
         # Standard filters
         is_mention_handled "$m_id" && continue
@@ -338,19 +298,33 @@ for repo in "${REPOS[@]}"; do
         is_bot_comment "$m_body" && { mark_mention_handled "$m_id"; continue; }
         ! is_authorized_user "$m_user" && { mark_mention_handled "$m_id"; continue; }
 
-        echo "[$(date -Iseconds)] $MENTION mention ($m_source) on $repo#$m_number"
-
-        # Build context
-        full_context=$(build_context "$repo" "$m_number" "$m_source" "$m_review_id")
-
-        # Dispatch: branch available → edit mode, otherwise → readonly
-        if [[ "$m_branch" != "null" && -n "$m_branch" ]]; then
-            respond_on_branch "$repo" "$m_number" "$full_context" "$m_branch" || true
-        else
-            respond_readonly "$repo" "$m_number" "$full_context" || true
-        fi
-
-        mark_mention_handled "$m_id"
-        exit 0
+        # Found actionable mention
+        echo "$mentions" | jq -c ".[$mi]"
+        return 0
     done
-done
+}
+
+handler_mentions_execute() {
+    local repo="$1"
+    local task_json="$2"
+
+    local m_id m_source m_number m_branch m_review_id
+    m_id=$(echo "$task_json" | jq -r '.id')
+    m_source=$(echo "$task_json" | jq -r '.source')
+    m_number=$(echo "$task_json" | jq -r '.number')
+    m_branch=$(echo "$task_json" | jq -r '.pr_branch')
+    m_review_id=$(echo "$task_json" | jq -r '.review_id // empty')
+
+    echo "[$(date -Iseconds)] $MENTION mention ($m_source) on $repo#$m_number"
+
+    local full_context
+    full_context=$(build_context "$repo" "$m_number" "$m_source" "$m_review_id")
+
+    if [[ "$m_branch" != "null" && -n "$m_branch" ]]; then
+        respond_on_branch "$repo" "$m_number" "$full_context" "$m_branch" || true
+    else
+        respond_readonly "$repo" "$m_number" "$full_context" || true
+    fi
+
+    mark_mention_handled "$m_id"
+}

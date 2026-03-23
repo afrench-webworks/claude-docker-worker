@@ -35,7 +35,7 @@ RUN echo 'export PATH="$HOME/.local/bin:$PATH"' >> /root/.bashrc \
 # Issue worker scripts and config
 COPY config.yaml /opt/issue-worker/config.yaml
 COPY scripts/ /opt/issue-worker/
-RUN chmod +x /opt/issue-worker/*.sh
+RUN chmod +x /opt/issue-worker/*.sh /opt/issue-worker/handlers/*.sh
 
 # Cron schedule
 COPY crontab /etc/cron.d/issue-worker

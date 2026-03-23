@@ -8,13 +8,15 @@ An always-on Docker container that autonomously works GitHub Issues using Claude
 
 ## How It Works
 
-Two cron-driven scripts run inside an Ubuntu 24.04 container:
+A single unified worker (`worker.sh`) runs every 5 minutes via cron inside an Ubuntu 24.04 container. Each cycle, it scans all configured repos for actionable work, picks the highest-priority task, and executes it. Processes one task per cycle.
 
-- **Comment Monitor** (`comment-monitor.sh`) — Runs every 5 minutes, 24/7. Scans for `@dockworker` mentions across issue comments, PR conversations, inline code reviews, and review summaries. Responds with analysis grounded in the actual codebase. On PRs with a `claude/*` branch, it can make code changes and push commits in response to feedback. Processes one mention per cycle.
+Work is organized into pluggable **handlers**, each with a priority and optional time window:
 
-- **Issue Worker** (`issue-worker.sh`) — Runs every 30 minutes from midnight to 8 AM (configurable timezone). Picks up new issues with the trigger label, creates a branch, invokes Claude Code to implement changes, and opens a PR. Processes one issue per cycle.
+- **Mentions** (priority 10, 24/7) — Scans for `@dockworker` mentions across issue comments, PR conversations, inline code reviews, and review summaries. Responds with analysis grounded in the actual codebase. On PRs with a branch, can make code changes and push commits in response to feedback.
 
-Both scripts are silent when there's nothing to do and use file-based locking to prevent collisions. State is tracked in JSON files on a persistent volume.
+- **Issues** (priority 20, midnight–8 AM by default) — Picks up new issues with the trigger label, creates a branch, invokes Claude Code to implement changes, and opens a PR.
+
+Mentions always take priority over issues. The worker is silent when there's nothing to do. Per-repo WIP tracking allows concurrent work across different repos — a long-running issue implementation on repo A won't block mention responses on repo B. State is tracked in JSON files on a persistent volume.
 
 ## Quick Setup
 
@@ -45,15 +47,17 @@ claude-docker-worker/
 ├── Dockerfile               # Ubuntu 24.04 + Claude Code + gh CLI + cron + SSH
 ├── README.md
 ├── config.yaml.example      # Template — copy to config.yaml and customize
-├── crontab                  # Cron schedule for scripts + token keep-alive
+├── crontab                  # Cron schedule for unified worker + token keep-alive
 ├── docker-compose.yml       # Container config with named volumes
-├── entrypoint.sh            # Boot-time setup (SSH keys, git auth, lock cleanup, cron)
+├── entrypoint.sh            # Boot-time setup (SSH keys, git auth, lock/WIP cleanup, cron)
 ├── settings.json.example    # Claude Code permissions — copied into container during setup
 └── scripts/
-    ├── common.sh            # Shared utilities (config, state, locking, logging)
-    ├── comment-monitor.sh   # Mention-driven response loop
+    ├── common.sh            # Shared utilities (config, state, locking, WIP, logging)
+    ├── worker.sh            # Unified work loop — one cron job, one task per cycle
     ├── github-app-token.sh  # GitHub App JWT auth with auto-discovery
-    └── issue-worker.sh      # Issue implementation and PR creation loop
+    └── handlers/
+        ├── mentions.sh      # Mention response handler (priority 10, 24/7)
+        └── issues.sh        # Issue implementation handler (priority 20, work window)
 ```
 
 ## Manual Setup
@@ -161,16 +165,11 @@ Create an issue with the trigger label (default: `claude-task`) on a monitored r
 
 ### Manual Runs
 
-SSH into the container and run either script directly:
+SSH into the container and run the worker directly:
 
 ```bash
 ssh claude-docker-worker
-
-# Test comment monitoring
-/opt/issue-worker/comment-monitor.sh
-
-# Test issue implementation
-/opt/issue-worker/issue-worker.sh
+/opt/issue-worker/worker.sh
 ```
 
 ### Check Logs
@@ -179,12 +178,11 @@ ssh claude-docker-worker
 # Cron output
 cat /root/workspace/.issue-worker/logs/cron.log
 
-# Per-script daily logs
-cat /root/workspace/.issue-worker/logs/comment-monitor-$(date +%Y-%m-%d).log
-cat /root/workspace/.issue-worker/logs/issue-worker-$(date +%Y-%m-%d).log
+# Worker daily log
+cat /root/workspace/.issue-worker/logs/worker-$(date +%Y-%m-%d).log
 ```
 
-Both scripts produce zero log output on quiet cycles. Logs are rotated on boot (older than 30 days are deleted).
+The worker produces zero log output on quiet cycles. Logs are rotated on boot (older than 30 days are deleted).
 
 ### Check State
 
@@ -208,12 +206,10 @@ jq 'del(.["owner/repo#42"])' /root/workspace/.issue-worker/state/processed-issue
 ### Rebuild After Config or Script Changes
 
 ```bash
-docker compose down
-docker compose build
-docker compose up -d
+docker compose build && docker compose up -d
 ```
 
-No need to re-inject SSH keys or re-authenticate — all credentials live in named volumes.
+No need to re-inject SSH keys or re-authenticate — all credentials live in named volumes. Scripts and config are baked into the image at build time, so changes to files in `scripts/`, `config.yaml`, or `crontab` require a rebuild.
 
 ## Volumes
 
@@ -239,10 +235,12 @@ No need to re-inject SSH keys or re-authenticate — all credentials live in nam
 | `git_bot_name` | Git committer name for automated commits |
 | `git_bot_email` | Git committer email for automated commits |
 | `app_id` | *(Optional)* GitHub App ID — enables posting as a bot identity instead of your personal account. Installations are auto-discovered at runtime. |
+| `issue_work_window_start` | *(Optional)* Hour (24h format) when issue processing begins. Default: `0` (midnight) |
+| `issue_work_window_end` | *(Optional)* Hour (24h format) when issue processing stops. Default: `8` |
 
 ### Cron Schedule
 
-Edit `crontab` to change polling intervals or work windows. The container timezone is set to `America/Chicago` in the Dockerfile — adjust `ln -sf /usr/share/zoneinfo/...` for a different timezone.
+Edit `crontab` to change the polling interval. The container timezone is set to `America/Chicago` in the Dockerfile — adjust `ln -sf /usr/share/zoneinfo/...` for a different timezone. The issue work window is configured in `config.yaml`, not the crontab.
 
 A token keep-alive job runs every 6 hours to prevent OAuth token expiry.
 
@@ -260,6 +258,6 @@ The container binds to `127.0.0.1:41922` by default (localhost only, not exposed
 
 **Git push fails:** Run `gh auth setup-git` inside the container. The entrypoint runs this on boot, but it requires `gh auth login` to have been completed first.
 
-**Stale locks blocking runs:** The entrypoint clears lock files on boot. If a script hangs mid-run, restart the container or manually delete files in `/root/workspace/.issue-worker/locks/`.
+**Stale locks blocking runs:** The entrypoint clears lock files and WIP state on boot. If the worker hangs mid-run, restart the container or manually delete files in `/root/workspace/.issue-worker/locks/` and `/root/workspace/.issue-worker/state/wip.json`.
 
 **Auth token expired:** The cron keep-alive job should prevent this, but if it happens, SSH in and run `claude auth login --headless` again.
