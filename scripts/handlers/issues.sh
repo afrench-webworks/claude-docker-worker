@@ -16,6 +16,9 @@
 handler_issues_priority=20
 
 handler_issues_is_in_window() {
+    # No window configured — always run
+    [[ -z "$ISSUE_WORK_WINDOW_START" || -z "$ISSUE_WORK_WINDOW_END" ]] && return 0
+
     local current_hour
     current_hour=$(date +%-H)
 

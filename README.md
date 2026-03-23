@@ -14,7 +14,7 @@ Work is organized into pluggable **handlers**, each with a priority and optional
 
 - **Mentions** (priority 10, 24/7) — Scans for `@dockworker` mentions across issue comments, PR conversations, inline code reviews, and review summaries. Responds with analysis grounded in the actual codebase. On PRs with a branch, can make code changes and push commits in response to feedback.
 
-- **Issues** (priority 20, midnight–8 AM by default) — Picks up new issues with the trigger label, creates a branch, invokes Claude Code to implement changes, and opens a PR.
+- **Issues** (priority 20, 24/7 by default) — Picks up new issues with the trigger label, creates a branch, invokes Claude Code to implement changes, and opens a PR. Optionally restricted to a time window via `issue_work_window_start`/`issue_work_window_end` in config.
 
 Mentions always take priority over issues. The worker is silent when there's nothing to do. Per-repo WIP tracking allows concurrent work across different repos — a long-running issue implementation on repo A won't block mention responses on repo B. State is tracked in JSON files on a persistent volume.
 
@@ -235,8 +235,8 @@ No need to re-inject SSH keys or re-authenticate — all credentials live in nam
 | `git_bot_name` | Git committer name for automated commits |
 | `git_bot_email` | Git committer email for automated commits |
 | `app_id` | *(Optional)* GitHub App ID — enables posting as a bot identity instead of your personal account. Installations are auto-discovered at runtime. |
-| `issue_work_window_start` | *(Optional)* Hour (24h format) when issue processing begins. Default: `0` (midnight) |
-| `issue_work_window_end` | *(Optional)* Hour (24h format) when issue processing stops. Default: `8` |
+| `issue_work_window_start` | *(Optional)* Hour (24h format) when issue processing begins. Omit to run 24/7. |
+| `issue_work_window_end` | *(Optional)* Hour (24h format) when issue processing stops. Omit to run 24/7. |
 
 ### Cron Schedule
 

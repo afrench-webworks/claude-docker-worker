@@ -90,11 +90,9 @@ load_config() {
         return 1
     fi
 
-    # Work window for issue handler (optional, defaults to midnight–8 AM)
+    # Work window for issue handler (optional — runs 24/7 if not set)
     ISSUE_WORK_WINDOW_START=$(_parse_config_value "issue_work_window_start")
-    [[ -z "$ISSUE_WORK_WINDOW_START" ]] && ISSUE_WORK_WINDOW_START=0
     ISSUE_WORK_WINDOW_END=$(_parse_config_value "issue_work_window_end")
-    [[ -z "$ISSUE_WORK_WINDOW_END" ]] && ISSUE_WORK_WINDOW_END=8
 
     # GitHub App config (optional — falls back to gh CLI auth if not set)
     APP_ID=$(_parse_config_value "app_id")
