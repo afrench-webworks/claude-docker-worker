@@ -165,6 +165,6 @@ Report the results and confirm the setup is complete. Remind the user that:
 
 - The container runs with `restart: always` and survives reboots
 - Claude Code auth tokens may expire after 30 days of inactivity
-- The comment monitor runs every 5 minutes and responds to mentions from authorized users only
-- The issue worker runs midnight–8AM and picks up issues labeled with their trigger label
-- They can test with `ssh claude-docker-worker` then `/opt/issue-worker/comment-monitor.sh`
+- The unified worker runs every 5 minutes, handling both mentions and labeled issues
+- Mentions are processed 24/7; issue processing runs 24/7 by default (configurable via `issue_work_window_start` / `issue_work_window_end` in `config.yaml`)
+- They can test with `ssh claude-docker-worker` then `/opt/issue-worker/worker.sh`
