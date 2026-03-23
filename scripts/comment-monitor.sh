@@ -1,21 +1,17 @@
 #!/bin/bash
-# comment-monitor.sh — Responds to @dockworker mentions in GitHub issues and PRs.
+# comment-monitor.sh — Responds to mentions in GitHub issues and PRs.
 # Runs every 5 minutes via cron. Silent when there are no mentions to handle.
 # Processes ONE mention per cycle for quality responses.
 #
-# Scans for unhandled @dockworker mentions across:
-#   - Issue comments (on monitored repos)
-#   - PR conversation comments
-#   - PR review comments (inline code comments on diffs)
-#   - PR review summaries (approve/request changes with body text)
+# Collects all unhandled mentions across every comment source (issue comments,
+# issue bodies, PR conversations, PR review comments, PR review summaries),
+# filters them, then dispatches to one of two response modes:
 #
-# Context is determined by where the mention is found:
-#   - On a PR with a claude/* branch → checks out branch, can make edits + push
-#   - On an issue or PR without a branch → read-only research from shared clone
-#
-# Uses the shared repo clone from repos/ so Claude has full file access.
+#   - On a PR with a branch → checks out branch, can make edits + push
+#   - On an issue (no branch) → read-only copy, analysis only
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROMPT_DIR="$SCRIPT_DIR/prompts"
 source "$SCRIPT_DIR/common.sh"
 
 setup_logging "comment-monitor"
@@ -26,6 +22,9 @@ load_config
 REPO_CACHE_DIR="$WORK_DIR/repos"
 HANDLED_MENTIONS_FILE="$STATE_DIR/handled-mentions.json"
 [[ -f "$HANDLED_MENTIONS_FILE" ]] || echo '{}' > "$HANDLED_MENTIONS_FILE"
+
+# Clean up stale readonly temp dirs (older than 1 hour)
+find "$WORK_DIR" -maxdepth 1 -name "readonly-*" -type d -mmin +60 -exec rm -rf {} \; 2>/dev/null
 
 # ---------------------------------------------------------------------------
 # ensure_repo_clone — reuse from issue-worker's shared clone
@@ -50,7 +49,7 @@ ensure_repo_clone() {
 }
 
 # ---------------------------------------------------------------------------
-# is_mention_handled — check if a comment ID has already been processed
+# is_mention_handled / mark_mention_handled — state tracking
 # ---------------------------------------------------------------------------
 is_mention_handled() {
     local comment_id="$1"
@@ -59,9 +58,6 @@ is_mention_handled() {
     [[ "$result" != "null" ]]
 }
 
-# ---------------------------------------------------------------------------
-# mark_mention_handled — record that a mention has been processed
-# ---------------------------------------------------------------------------
 mark_mention_handled() {
     local comment_id="$1"
     local tmp="${HANDLED_MENTIONS_FILE}.tmp"
@@ -69,14 +65,36 @@ mark_mention_handled() {
 }
 
 # ---------------------------------------------------------------------------
-# respond_on_branch — checkout PR branch, run Claude, let Claude commit/push/reply
+# render_prompt — read a template file and substitute {{variables}}
+# ---------------------------------------------------------------------------
+render_prompt() {
+    local template_file="$1"
+    local repo="$2"
+    local number="$3"
+    local context="$4"
+    local branch="${5:-}"
+
+    local prompt
+    prompt=$(<"$template_file")
+
+    # Use parameter expansion for simple substitutions, heredoc for context
+    prompt="${prompt//\{\{repo\}\}/$repo}"
+    prompt="${prompt//\{\{number\}\}/$number}"
+    prompt="${prompt//\{\{branch\}\}/$branch}"
+    prompt="${prompt//\{\{bot_signature\}\}/$BOT_SIGNATURE}"
+    prompt="${prompt//\{\{context\}\}/$context}"
+
+    printf '%s' "$prompt"
+}
+
+# ---------------------------------------------------------------------------
+# respond_on_branch — checkout PR branch, run Claude, let it edit/commit/push
 # ---------------------------------------------------------------------------
 respond_on_branch() {
     local repo="$1"
-    local issue_number="$2"
-    local pr_number="$3"
-    local full_context="$4"
-    local branch_name="$5"
+    local pr_number="$2"
+    local full_context="$3"
+    local branch_name="$4"
 
     ensure_repo_clone "$repo" || return 1
 
@@ -95,27 +113,10 @@ respond_on_branch() {
     }
     git pull --rebase origin "$branch_name" 2>/dev/null || true
 
-    claude --model opus -p "You are an automated assistant responding to a mention in a GitHub pull request.
-You are inside the repository's working directory on the PR branch.
-You have full access to read files, explore the codebase, and make edits.
+    local prompt
+    prompt=$(render_prompt "$PROMPT_DIR/respond-on-branch.md" "$repo" "$pr_number" "$full_context" "$branch_name")
 
-Repository: $repo
-Issue #$issue_number / PR #$pr_number
-
-Full context:
-$full_context
-
-Instructions:
-1. Read the comment that mentioned you carefully.
-2. Explore relevant files in the repository to give an informed response.
-3. If the comment requests code changes or adjustments, go ahead and make them.
-4. If the comment asks a question about the code, look at the actual files and give
-   a specific, grounded answer.
-5. If you made any file changes, stage, commit, and push them to the current branch.
-   Use commit message: \"address feedback on issue #$issue_number\"
-   Add Co-Authored-By: Claude <noreply@anthropic.com> to each commit.
-6. When done, post a reply on the PR using gh issue comment.
-   End every reply with this signature on its own line: $BOT_SIGNATURE" 2>&1 || {
+    claude --model opus -p "$prompt" 2>&1 || {
         echo "[$(date -Iseconds)] ERROR: Claude failed for $repo PR #$pr_number"
         cd - > /dev/null
         release_repo_lock
@@ -133,8 +134,7 @@ Instructions:
 }
 
 # ---------------------------------------------------------------------------
-# respond_readonly — run Claude in a read-only clone context
-# Sets $reply
+# respond_readonly — run Claude in a gitless copy (structurally read-only)
 # ---------------------------------------------------------------------------
 respond_readonly() {
     local repo="$1"
@@ -143,225 +143,214 @@ respond_readonly() {
 
     ensure_repo_clone "$repo" || return 1
 
-    cd "$repo_dir"
-    claude --model opus -p "You are an automated assistant responding to a mention on GitHub.
-You are inside the repository's working directory and can read any files for context.
+    # Create a gitless copy so Claude structurally cannot commit anywhere
+    local dir_name
+    dir_name="$(echo "$repo" | tr '/' '-')"
+    local readonly_workdir="$WORK_DIR/readonly-${dir_name}-$$"
+    cp -a "$repo_dir"/. "$readonly_workdir"/
+    rm -rf "$readonly_workdir/.git"
 
-Repository: $repo
-Issue/PR #$number
+    cd "$readonly_workdir"
 
-Full context:
-$full_context
+    local prompt
+    prompt=$(render_prompt "$PROMPT_DIR/respond-readonly.md" "$repo" "$number" "$full_context")
 
-Instructions:
-1. Read the comment that mentioned you carefully.
-2. Explore relevant files in the repository to give an informed response.
-3. Reference specific files, functions, and code when answering.
-4. Write a concise, grounded response based on what you find in the actual codebase.
-5. When done, post your reply on the issue/PR using gh issue comment.
-   End every reply with this signature on its own line: $BOT_SIGNATURE" 2>&1 || {
+    claude --model opus -p "$prompt" 2>&1 || {
         echo "[$(date -Iseconds)] ERROR: Claude failed for $repo#$number"
         cd - > /dev/null
+        rm -rf "$readonly_workdir"
         return 1
     }
+
     cd - > /dev/null
+    rm -rf "$readonly_workdir"
     return 0
 }
 
 # ---------------------------------------------------------------------------
-# find_pr_branch — check if a PR has a claude/* branch we can work on
-# Sets $found_branch if found, empty string otherwise
+# collect_mentions — gather all unhandled mentions from a repo into a JSON array
 # ---------------------------------------------------------------------------
-find_pr_branch() {
+collect_mentions() {
     local repo="$1"
-    local pr_number="$2"
-    found_branch=$(gh pr view "$pr_number" -R "$repo" --json headRefName --jq '.headRefName' 2>/dev/null)
-    if [[ "$found_branch" == claude/* ]]; then
-        return 0
-    fi
-    found_branch=""
-    return 1
+    local mentions="[]"
+
+    # --- PRs: conversation comments, review comments, review summaries ---
+    local prs_json
+    prs_json=$(gh pr list -R "$repo" --state open --json number,headRefName 2>/dev/null) || prs_json="[]"
+
+    local pr_count
+    pr_count=$(echo "$prs_json" | jq length 2>/dev/null) || pr_count=0
+
+    for pi in $(seq 0 $((pr_count - 1))); do
+        local pr_number branch_name
+        pr_number=$(echo "$prs_json" | jq -r ".[$pi].number")
+        branch_name=$(echo "$prs_json" | jq -r ".[$pi].headRefName")
+
+        # PR conversation comments
+        local pr_comments
+        pr_comments=$(gh api "repos/${repo}/issues/${pr_number}/comments" \
+            --jq 'map({id: (.id | tostring), body, user: .user.login})' 2>/dev/null) || pr_comments="[]"
+
+        mentions=$(echo "$mentions" | jq --argjson comments "$pr_comments" \
+            --arg src "pr-conversation" --arg num "$pr_number" --arg branch "$branch_name" \
+            '. + [$comments[] | . + {source: $src, number: ($num | tonumber), pr_branch: $branch}]')
+
+        # PR review comments (inline code comments)
+        local review_comments
+        review_comments=$(gh api "repos/${repo}/pulls/${pr_number}/comments" \
+            --jq 'map({id: (.id | tostring), body, user: .user.login, path, line: .line})' 2>/dev/null) || review_comments="[]"
+
+        mentions=$(echo "$mentions" | jq --argjson comments "$review_comments" \
+            --arg src "pr-review-comment" --arg num "$pr_number" --arg branch "$branch_name" \
+            '. + [$comments[] | . + {source: $src, number: ($num | tonumber), pr_branch: $branch}]')
+
+        # PR review summaries
+        local reviews
+        reviews=$(gh api "repos/${repo}/pulls/${pr_number}/reviews" \
+            --jq 'map({id: (.id | tostring), body, user: .user.login, state, review_id: (.id | tostring)}) | map(select(.body != null and .body != ""))' 2>/dev/null) || reviews="[]"
+
+        mentions=$(echo "$mentions" | jq --argjson comments "$reviews" \
+            --arg src "pr-review" --arg num "$pr_number" --arg branch "$branch_name" \
+            '. + [$comments[] | . + {source: $src, number: ($num | tonumber), pr_branch: $branch}]')
+    done
+
+    # --- Issues: comments and bodies ---
+    local issues_json
+    issues_json=$(gh issue list -R "$repo" --state open --json number,title --limit 100 2>/dev/null) || issues_json="[]"
+
+    local issue_count
+    issue_count=$(echo "$issues_json" | jq length 2>/dev/null) || issue_count=0
+
+    for ii in $(seq 0 $((issue_count - 1))); do
+        local issue_number issue_title
+        issue_number=$(echo "$issues_json" | jq -r ".[$ii].number")
+        issue_title=$(echo "$issues_json" | jq -r ".[$ii].title")
+
+        # Issue comments
+        local issue_comments
+        issue_comments=$(gh api "repos/${repo}/issues/${issue_number}/comments" \
+            --jq 'map({id: (.id | tostring), body, user: .user.login})' 2>/dev/null) || issue_comments="[]"
+
+        mentions=$(echo "$mentions" | jq --argjson comments "$issue_comments" \
+            --arg src "issue-comment" --arg num "$issue_number" \
+            '. + [$comments[] | . + {source: $src, number: ($num | tonumber), pr_branch: null}]')
+
+        # Issue body
+        local issue_data
+        issue_data=$(gh issue view "$issue_number" -R "$repo" --json body,author \
+            --jq '{body, author: .author.login}' 2>/dev/null) || continue
+
+        local issue_body issue_author
+        issue_body=$(echo "$issue_data" | jq -r '.body')
+        issue_author=$(echo "$issue_data" | jq -r '.author')
+
+        if [[ -n "$issue_body" && "$issue_body" != "null" ]]; then
+            local body_id="issue-body-${repo}#${issue_number}"
+            mentions=$(echo "$mentions" | jq --arg id "$body_id" --arg body "$issue_body" \
+                --arg user "$issue_author" --arg num "$issue_number" \
+                '. + [{id: $id, body: $body, user: $user, source: "issue-body", number: ($num | tonumber), pr_branch: null}]')
+        fi
+    done
+
+    echo "$mentions"
+}
+
+# ---------------------------------------------------------------------------
+# build_context — assemble full context JSON for a mention
+# ---------------------------------------------------------------------------
+build_context() {
+    local repo="$1"
+    local number="$2"
+    local source="$3"
+    local review_id="${4:-}"
+
+    local context="{}"
+
+    case "$source" in
+        pr-conversation|pr-review-comment|pr-review)
+            context=$(gh pr view "$number" -R "$repo" --json title,body,comments \
+                --jq '{title, body, comments: [.comments[] | {author: .author.login, body}]}' 2>/dev/null) || context="{}"
+
+            # Include all inline review comments
+            local review_comments
+            review_comments=$(gh api "repos/${repo}/pulls/${number}/comments" \
+                --jq 'map({author: .user.login, path, line: .line, body})' 2>/dev/null) || review_comments="[]"
+            context=$(echo "$context" | jq --argjson rc "$review_comments" '. + {review_comments: $rc}')
+
+            # Include latest review state
+            local latest_review
+            latest_review=$(gh api "repos/${repo}/pulls/${number}/reviews" \
+                --jq '[.[] | select(.body != null and .body != "")] | sort_by(.submitted_at) | last // empty' 2>/dev/null) || latest_review=""
+            if [[ -n "$latest_review" && "$latest_review" != "null" ]]; then
+                context=$(echo "$context" | jq --argjson lr "$latest_review" \
+                    '. + {latest_review: {state: $lr.state, body: $lr.body}}')
+
+                # If this is a review mention, fetch that review's inline comments
+                if [[ "$source" == "pr-review" && -n "$review_id" ]]; then
+                    local review_inline
+                    review_inline=$(gh api "repos/${repo}/pulls/${number}/reviews/${review_id}/comments" \
+                        --jq 'map({path, line: .line, body, author: .user.login})' 2>/dev/null) || review_inline="[]"
+                    context=$(echo "$context" | jq --argjson ric "$review_inline" \
+                        '.latest_review.inline_comments = $ric')
+                fi
+            fi
+            ;;
+        issue-comment|issue-body)
+            context=$(gh issue view "$number" -R "$repo" --json title,body,comments \
+                --jq '{title, body, comments: [.comments[] | {author: .author.login, body}]}' 2>/dev/null) || context="{}"
+
+            # Check if there's an associated PR we can reference
+            local pr_status
+            pr_status=$(read_state_field "$PROCESSED_ISSUES_FILE" "${repo}#${number}" "status")
+            if [[ "$pr_status" == "pr-opened" ]]; then
+                local pr_url
+                pr_url=$(read_state_field "$PROCESSED_ISSUES_FILE" "${repo}#${number}" "pr_url")
+                context=$(echo "$context" | jq --arg pr "$pr_url" '. + {linked_pr: $pr}')
+            fi
+            ;;
+    esac
+
+    echo "$context"
 }
 
 # ===========================================================================
-# Scan all comment sources for unhandled @dockworker mentions
+# Main loop: collect mentions, filter, dispatch
 # ===========================================================================
 
 for repo in "${REPOS[@]}"; do
     set_app_token_for_repo "$repo"
 
-    # -------------------------------------------------------------------
-    # 1. PR comments — scan all open PRs (review comments, reviews, conversation)
-    #    claude/* branches get respond_on_branch; others get respond_readonly
-    # -------------------------------------------------------------------
-    prs_json=$(gh pr list -R "$repo" --state open --json number,headRefName \
-        2>/dev/null) || prs_json="[]"
+    mentions=$(collect_mentions "$repo")
+    mention_count=$(echo "$mentions" | jq length 2>/dev/null) || mention_count=0
 
-    pr_count=$(echo "$prs_json" | jq length 2>/dev/null)
-    for pi in $(seq 0 $((${pr_count:-0} - 1))); do
-        pr_number=$(echo "$prs_json" | jq -r ".[$pi].number")
-        branch_name=$(echo "$prs_json" | jq -r ".[$pi].headRefName")
-        is_claude_branch=false
-        if [[ "$branch_name" == claude/* ]]; then
-            is_claude_branch=true
-            issue_number=$(echo "$branch_name" | sed 's/claude\/issue-//')
+    for mi in $(seq 0 $((mention_count - 1))); do
+        m_id=$(echo "$mentions" | jq -r ".[$mi].id")
+        m_body=$(echo "$mentions" | jq -r ".[$mi].body")
+        m_user=$(echo "$mentions" | jq -r ".[$mi].user")
+        m_source=$(echo "$mentions" | jq -r ".[$mi].source")
+        m_number=$(echo "$mentions" | jq -r ".[$mi].number")
+        m_branch=$(echo "$mentions" | jq -r ".[$mi].pr_branch")
+        m_review_id=$(echo "$mentions" | jq -r ".[$mi].review_id // empty")
+
+        # Standard filters
+        is_mention_handled "$m_id" && continue
+        ! has_mention "$m_body" && continue
+        is_bot_comment "$m_body" && { mark_mention_handled "$m_id"; continue; }
+        ! is_authorized_user "$m_user" && { mark_mention_handled "$m_id"; continue; }
+
+        echo "[$(date -Iseconds)] $MENTION mention ($m_source) on $repo#$m_number"
+
+        # Build context
+        full_context=$(build_context "$repo" "$m_number" "$m_source" "$m_review_id")
+
+        # Dispatch: branch available → edit mode, otherwise → readonly
+        if [[ "$m_branch" != "null" && -n "$m_branch" ]]; then
+            respond_on_branch "$repo" "$m_number" "$full_context" "$m_branch" || true
         else
-            issue_number="$pr_number"
+            respond_readonly "$repo" "$m_number" "$full_context" || true
         fi
 
-        # PR review comments (inline)
-        review_comments=$(gh api "repos/${repo}/pulls/${pr_number}/comments" \
-            --jq 'map({id: (.id | tostring), body, user: .user.login, path, line: .line, created_at}) | sort_by(.created_at)' 2>/dev/null) || continue
-
-        for ri in $(seq 0 $(($(echo "$review_comments" | jq length) - 1))); do
-            rc_id=$(echo "$review_comments" | jq -r ".[$ri].id")
-            rc_body=$(echo "$review_comments" | jq -r ".[$ri].body")
-            rc_user=$(echo "$review_comments" | jq -r ".[$ri].user")
-
-            is_mention_handled "$rc_id" && continue
-            ! has_mention "$rc_body" && continue
-            is_bot_comment "$rc_body" && { mark_mention_handled "$rc_id"; continue; }
-            ! is_authorized_user "$rc_user" && { mark_mention_handled "$rc_id"; continue; }
-
-            echo "[$(date -Iseconds)] $MENTION mention in PR review comment on $repo PR #$pr_number"
-
-            full_context=$(gh pr view "$pr_number" -R "$repo" --json title,body,comments \
-                --jq '{title, body, comments: [.comments[] | {author: .author.login, body}]}' 2>/dev/null) || full_context="{}"
-            review_ctx=$(echo "$review_comments" | jq '[.[] | {author: .user, path, line, body}]')
-            full_context=$(echo "$full_context" | jq --argjson rc "$review_ctx" '. + {review_comments: $rc}')
-
-            if $is_claude_branch; then
-                respond_on_branch "$repo" "$issue_number" "$pr_number" "$full_context" "$branch_name" || true
-            else
-                respond_readonly "$repo" "$pr_number" "$full_context" || true
-            fi
-            mark_mention_handled "$rc_id"
-            exit 0
-        done
-
-        # PR review summaries (approve/request changes)
-        reviews=$(gh api "repos/${repo}/pulls/${pr_number}/reviews" \
-            --jq 'map({id: (.id | tostring), body, user: .user.login, state, submitted_at}) | sort_by(.submitted_at)' 2>/dev/null) || continue
-
-        for ri in $(seq 0 $(($(echo "$reviews" | jq length) - 1))); do
-            rv_id=$(echo "$reviews" | jq -r ".[$ri].id")
-            rv_body=$(echo "$reviews" | jq -r ".[$ri].body")
-            rv_state=$(echo "$reviews" | jq -r ".[$ri].state")
-            rv_user=$(echo "$reviews" | jq -r ".[$ri].user")
-
-            is_mention_handled "$rv_id" && continue
-            [[ -z "$rv_body" || "$rv_body" == "null" ]] && continue
-            ! has_mention "$rv_body" && continue
-            is_bot_comment "$rv_body" && { mark_mention_handled "$rv_id"; continue; }
-            ! is_authorized_user "$rv_user" && { mark_mention_handled "$rv_id"; continue; }
-
-            echo "[$(date -Iseconds)] $MENTION mention in PR review ($rv_state) on $repo PR #$pr_number"
-
-            full_context=$(gh pr view "$pr_number" -R "$repo" --json title,body,comments \
-                --jq '{title, body, comments: [.comments[] | {author: .author.login, body}]}' 2>/dev/null) || full_context="{}"
-            full_context=$(echo "$full_context" | jq --arg rs "$rv_state" --arg rb "$rv_body" \
-                '. + {latest_review: {state: $rs, body: $rb}}')
-
-            if $is_claude_branch; then
-                respond_on_branch "$repo" "$issue_number" "$pr_number" "$full_context" "$branch_name" || true
-            else
-                respond_readonly "$repo" "$pr_number" "$full_context" || true
-            fi
-            mark_mention_handled "$rv_id"
-            exit 0
-        done
-
-        # PR conversation comments
-        pr_comments=$(gh api "repos/${repo}/issues/${pr_number}/comments" \
-            --jq 'map({id: (.id | tostring), body, user: .user.login, created_at})' 2>/dev/null) || continue
-
-        for ci in $(seq 0 $(($(echo "$pr_comments" | jq length) - 1))); do
-            pc_id=$(echo "$pr_comments" | jq -r ".[$ci].id")
-            pc_body=$(echo "$pr_comments" | jq -r ".[$ci].body")
-            pc_user=$(echo "$pr_comments" | jq -r ".[$ci].user")
-
-            is_mention_handled "$pc_id" && continue
-            ! has_mention "$pc_body" && continue
-            is_bot_comment "$pc_body" && { mark_mention_handled "$pc_id"; continue; }
-            ! is_authorized_user "$pc_user" && { mark_mention_handled "$pc_id"; continue; }
-
-            echo "[$(date -Iseconds)] $MENTION mention in PR conversation on $repo PR #$pr_number"
-
-            full_context=$(gh pr view "$pr_number" -R "$repo" --json title,body,comments \
-                --jq '{title, body, comments: [.comments[] | {author: .author.login, body}]}' 2>/dev/null) || full_context="{}"
-            pr_conv=$(echo "$pr_comments" | jq '[.[] | {author: .user, body}]')
-            full_context=$(echo "$full_context" | jq --argjson pc "$pr_conv" '. + {pr_comments: $pc}')
-
-            if $is_claude_branch; then
-                respond_on_branch "$repo" "$issue_number" "$pr_number" "$full_context" "$branch_name" || true
-            else
-                respond_readonly "$repo" "$pr_number" "$full_context" || true
-            fi
-            mark_mention_handled "$pc_id"
-            exit 0
-        done
-    done
-
-    # -------------------------------------------------------------------
-    # 2. Issue comments — scan all open issues in monitored repos
-    # -------------------------------------------------------------------
-    issues_json=$(gh issue list -R "$repo" --state open --json number,title --limit 100 2>/dev/null) || continue
-
-    issue_count=$(echo "$issues_json" | jq length)
-    for ii in $(seq 0 $((${issue_count:-0} - 1))); do
-        issue_number=$(echo "$issues_json" | jq -r ".[$ii].number")
-        issue_title=$(echo "$issues_json" | jq -r ".[$ii].title")
-
-        comments_json=$(gh api "repos/${repo}/issues/${issue_number}/comments" \
-            --jq 'map({id: (.id | tostring), body, user: .user.login, created_at})' 2>/dev/null) || continue
-
-        for ci in $(seq 0 $(($(echo "$comments_json" | jq length) - 1))); do
-            c_id=$(echo "$comments_json" | jq -r ".[$ci].id")
-            c_body=$(echo "$comments_json" | jq -r ".[$ci].body")
-            c_user=$(echo "$comments_json" | jq -r ".[$ci].user")
-
-            is_mention_handled "$c_id" && continue
-            ! has_mention "$c_body" && continue
-            is_bot_comment "$c_body" && { mark_mention_handled "$c_id"; continue; }
-            ! is_authorized_user "$c_user" && { mark_mention_handled "$c_id"; continue; }
-
-            echo "[$(date -Iseconds)] $MENTION mention on $repo#$issue_number: $issue_title"
-
-            full_context=$(gh issue view "$issue_number" -R "$repo" --json title,body,comments \
-                --jq '{title, body, comments: [.comments[] | {author: .author.login, body}]}' 2>/dev/null) || continue
-
-            # Check if there's an associated PR we can work on
-            pr_status=$(read_state_field "$PROCESSED_ISSUES_FILE" "${repo}#${issue_number}" "status")
-
-            if [[ "$pr_status" == "pr-opened" ]]; then
-                branch_name="claude/issue-${issue_number}"
-                pr_number=$(read_state_field "$PROCESSED_ISSUES_FILE" "${repo}#${issue_number}" "pr_url" | grep -oP '\d+$')
-                respond_on_branch "$repo" "$issue_number" "${pr_number:-$issue_number}" "$full_context" "$branch_name" || \
-                    respond_readonly "$repo" "$issue_number" "$full_context" || continue
-            else
-                respond_readonly "$repo" "$issue_number" "$full_context" || continue
-            fi
-
-            mark_mention_handled "$c_id"
-            exit 0
-        done
-
-        # Also check the issue body itself for a mention (first-contact scenario)
-        issue_data=$(gh issue view "$issue_number" -R "$repo" --json body,author --jq '{body, author: .author.login}' 2>/dev/null) || continue
-        issue_body=$(echo "$issue_data" | jq -r '.body')
-        issue_author=$(echo "$issue_data" | jq -r '.author')
-        body_key="issue-body-${repo}#${issue_number}"
-
-        if has_mention "$issue_body" && ! is_mention_handled "$body_key" && is_authorized_user "$issue_author"; then
-            echo "[$(date -Iseconds)] $MENTION mention in issue body on $repo#$issue_number: $issue_title"
-
-            full_context=$(gh issue view "$issue_number" -R "$repo" --json title,body,comments \
-                --jq '{title, body, comments: [.comments[] | {author: .author.login, body}]}' 2>/dev/null) || continue
-
-            respond_readonly "$repo" "$issue_number" "$full_context" || continue
-
-            mark_mention_handled "$body_key"
-            exit 0
-        fi
+        mark_mention_handled "$m_id"
+        exit 0
     done
 done
