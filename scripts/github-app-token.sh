@@ -131,6 +131,18 @@ _inject_token_into_settings() {
 }
 
 # ---------------------------------------------------------------------------
+# _clear_token_from_settings — Remove GH_TOKEN from settings.json so gh CLI
+# auth takes over when app token refresh fails
+# ---------------------------------------------------------------------------
+_clear_token_from_settings() {
+    if [[ ! -f "$CLAUDE_SETTINGS_FILE" ]]; then
+        return 0
+    fi
+    local tmp="${CLAUDE_SETTINGS_FILE}.tmp"
+    jq 'del(.env.GH_TOKEN)' "$CLAUDE_SETTINGS_FILE" > "$tmp" && mv "$tmp" "$CLAUDE_SETTINGS_FILE"
+}
+
+# ---------------------------------------------------------------------------
 # set_app_token_for_repo — Set GH_TOKEN for the owner of the given repo.
 # Args: "owner/repo"
 # No-op if the app isn't configured or doesn't have an installation for
@@ -157,6 +169,7 @@ set_app_token_for_repo() {
     done
     if [[ -z "$installation_id" ]]; then
         # No installation for this owner — fall back to gh CLI auth
+        _clear_token_from_settings
         unset GH_TOKEN
         return 0
     fi
@@ -187,6 +200,8 @@ set_app_token_for_repo() {
     # Generate fresh token
     local token
     token=$(_get_installation_token "$APP_ID" "$installation_id") || {
+        # Remove stale token from settings.json so gh CLI auth can take over
+        _clear_token_from_settings
         unset GH_TOKEN
         return 1
     }
