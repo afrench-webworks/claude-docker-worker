@@ -80,7 +80,8 @@ respond_on_branch() {
     local prompt
     prompt=$(render_prompt "$PROMPT_DIR/respond-on-branch.md" "$repo" "$pr_number" "$full_context" "$branch_name")
 
-    claude --model opus -p "$prompt" 2>&1 || {
+    # shellcheck disable=SC2086
+    claude --model opus $CLAUDE_PLUGIN_FLAGS -p "$prompt" 2>&1 || {
         echo "[$(date -Iseconds)] ERROR: Claude failed for $repo PR #$pr_number"
         cd - > /dev/null
         release_repo_lock
@@ -118,7 +119,8 @@ respond_readonly() {
     local prompt
     prompt=$(render_prompt "$PROMPT_DIR/respond-readonly.md" "$repo" "$number" "$full_context")
 
-    claude --model opus -p "$prompt" 2>&1 || {
+    # shellcheck disable=SC2086
+    claude --model opus $CLAUDE_PLUGIN_FLAGS -p "$prompt" 2>&1 || {
         echo "[$(date -Iseconds)] ERROR: Claude failed for $repo#$number"
         cd - > /dev/null
         rm -rf "$readonly_workdir"
