@@ -120,7 +120,7 @@ handler_issues_execute() {
     # Invoke Claude Code to implement the changes
     local claude_output
     # shellcheck disable=SC2086
-    claude_output=$(claude --model opus $CLAUDE_COMMON_FLAGS $CLAUDE_PLUGIN_FLAGS -p "You are an automated developer working inside a cloned repository.
+    claude_output=$(claude --model opus $CLAUDE_PLUGIN_FLAGS -p "You are an automated developer working inside a cloned repository.
 Your job is to implement changes for a GitHub issue. You have full access to the
 codebase and all standard tools (read, write, edit, grep, glob, bash).
 

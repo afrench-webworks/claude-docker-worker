@@ -81,7 +81,7 @@ respond_on_branch() {
     prompt=$(render_prompt "$PROMPT_DIR/respond-on-branch.md" "$repo" "$pr_number" "$full_context" "$branch_name")
 
     # shellcheck disable=SC2086
-    claude --model opus $CLAUDE_COMMON_FLAGS $CLAUDE_PLUGIN_FLAGS -p "$prompt" 2>&1 || {
+    claude --model opus $CLAUDE_PLUGIN_FLAGS -p "$prompt" 2>&1 || {
         echo "[$(date -Iseconds)] ERROR: Claude failed for $repo PR #$pr_number"
         cd - > /dev/null
         release_repo_lock
@@ -120,7 +120,7 @@ respond_readonly() {
     prompt=$(render_prompt "$PROMPT_DIR/respond-readonly.md" "$repo" "$number" "$full_context")
 
     # shellcheck disable=SC2086
-    claude --model opus $CLAUDE_COMMON_FLAGS $CLAUDE_PLUGIN_FLAGS -p "$prompt" 2>&1 || {
+    claude --model opus $CLAUDE_PLUGIN_FLAGS -p "$prompt" 2>&1 || {
         echo "[$(date -Iseconds)] ERROR: Claude failed for $repo#$number"
         cd - > /dev/null
         rm -rf "$readonly_workdir"

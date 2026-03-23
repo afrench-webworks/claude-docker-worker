@@ -133,11 +133,6 @@ _discover_plugins() {
     fi
 }
 
-# CLAUDE_COMMON_FLAGS — standard flags for all claude invocations.
-# --dangerously-skip-permissions is safe here because the Docker container
-# is already a sandbox — settings.json permissions are redundant.
-CLAUDE_COMMON_FLAGS="--dangerously-skip-permissions"
-
 # ---------------------------------------------------------------------------
 # Repo clone management — unified clone with optional fresh fetch
 # ---------------------------------------------------------------------------
