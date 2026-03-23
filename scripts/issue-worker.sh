@@ -167,14 +167,12 @@ Instructions:
             echo "[$(date -Iseconds)] ERROR: Claude Code invocation failed for $repo#$issue_number"
             write_state "$PROCESSED_ISSUES_FILE" "$state_key" \
                 "{\"status\":\"failed\",\"reason\":\"claude-failed\",\"processed_at\":\"$(date -Iseconds)\"}"
-            # Truncate and filter output before posting — avoid leaking tokens or secrets
+            # Redact any tokens that may appear in Claude's output
             local safe_output
-            safe_output=$(echo "$claude_output" | head -c 2000 | sed -E 's/(ghp_|gho_|github_pat_|ghs_)[A-Za-z0-9_]+/[REDACTED]/g')
-            gh issue comment "$issue_number" -R "$repo" --body "I attempted to work on this issue but encountered an error during implementation. Here's a summary:
+            safe_output=$(echo "$claude_output" | sed -E 's/(ghp_|gho_|github_pat_|ghs_)[A-Za-z0-9_]+/[REDACTED]/g')
+            gh issue comment "$issue_number" -R "$repo" --body "I attempted to work on this issue but encountered an error during implementation. Here's what happened:
 
-\`\`\`
 $safe_output
-\`\`\`
 
 ${BOT_SIGNATURE}" 2>/dev/null
             cd - > /dev/null

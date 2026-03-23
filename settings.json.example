@@ -22,17 +22,9 @@
       "Bash(npm *)",
       "Bash(npx *)",
       "Bash(node *)",
-      "Bash(dotnet *)",
-      "Bash(msbuild *)",
       "Bash(which *)",
-      "Bash(where *)",
       "Bash(echo *)",
-      "Bash(gh *)",
-      "Bash(curl *)",
-      "Bash(python *)",
-      "Bash(pip *)",
-      "Bash(cargo *)",
-      "Bash(rustc *)"
+      "Bash(gh *)"
     ],
     "deny": []
   }
