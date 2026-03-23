@@ -100,7 +100,10 @@ _get_installation_token() {
     token=$(echo "$response" | jq -r '.token // empty')
 
     if [[ -z "$token" ]]; then
-        echo "[$(date -Iseconds)] ERROR: Failed to get installation token: $response" >&2
+        # Log only the error message, not the full API response (may contain tokens)
+        local error_msg
+        error_msg=$(echo "$response" | jq -r '.message // "unknown error"' 2>/dev/null)
+        echo "[$(date -Iseconds)] ERROR: Failed to get installation token: $error_msg" >&2
         return 1
     fi
 

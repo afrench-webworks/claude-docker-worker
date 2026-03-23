@@ -147,6 +147,9 @@ setup_logging() {
     mkdir -p "$LOG_DIR"
     LOG_FILE="$LOG_DIR/${script_name}-$(date +%Y-%m-%d).log"
 
+    # Rotate logs older than 14 days
+    find "$LOG_DIR" -name "*.log" -mtime +14 -delete 2>/dev/null
+
     exec > >(tee -a "$LOG_FILE") 2>&1
 }
 
