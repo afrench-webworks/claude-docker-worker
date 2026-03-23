@@ -39,19 +39,36 @@ _parse_config_value() {
 }
 
 load_config() {
-    # Parse repos list (lines starting with "  - ")
-    REPOS=()
-    while IFS= read -r line; do
-        repo=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//' | sed 's/[[:space:]]*#.*//')
-        [[ -n "$repo" ]] && REPOS+=("$repo")
-    done < <(grep -A 100 '^repos:' "$CONFIG_FILE" | tail -n +2 | grep '^[[:space:]]*-' | grep -v '^[[:space:]]*#')
+    # _parse_yaml_list — extract list items under a top-level key, stopping at the next key
+    _parse_yaml_list() {
+        local key="$1"
+        local in_section=false
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^${key}: ]]; then
+                in_section=true
+                continue
+            fi
+            # Stop at the next top-level key (non-indented, non-blank, non-comment)
+            if $in_section && [[ "$line" =~ ^[^[:space:]#] ]]; then
+                break
+            fi
+            if $in_section && [[ "$line" =~ ^[[:space:]]*-[[:space:]] ]]; then
+                local value
+                value=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//' | sed 's/[[:space:]]*#.*//')
+                [[ -n "$value" ]] && echo "$value"
+            fi
+        done < "$CONFIG_FILE"
+    }
 
-    # Parse authorized_users list (same format as repos)
+    REPOS=()
+    while IFS= read -r repo; do
+        REPOS+=("$repo")
+    done < <(_parse_yaml_list "repos")
+
     AUTHORIZED_USERS=()
-    while IFS= read -r line; do
-        user=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//' | sed 's/[[:space:]]*#.*//')
-        [[ -n "$user" ]] && AUTHORIZED_USERS+=("$user")
-    done < <(grep -A 100 '^authorized_users:' "$CONFIG_FILE" | tail -n +2 | grep '^[[:space:]]*-' | grep -v '^[[:space:]]*#')
+    while IFS= read -r user; do
+        AUTHORIZED_USERS+=("$user")
+    done < <(_parse_yaml_list "authorized_users")
 
     LABEL=$(_parse_config_value "label")
     MENTION=$(_parse_config_value "mention")
