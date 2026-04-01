@@ -5,18 +5,22 @@ repos:
 authorized_users:
   - your-github-username           # Only respond to mentions from these users
 
-label: claude-task                 # Issues must have this label to be picked up by the issue worker
 mention: "@dockworker"             # Comment monitor only responds to comments containing this mention
 bot_signature: "— 🚢 Claude Dockworker"
 git_bot_name: "claude-docker-worker"
 git_bot_email: "claude-docker-worker@noreply.github.com"
+
+# Label prefix for the dockworker:* label system (default: dockworker)
+# Labels created: dockworker:ready, dockworker:needs-info, dockworker:in-progress,
+#                 dockworker:pr-open, dockworker:done, dockworker:failed, dockworker:skip
+# label_prefix: dockworker
 
 # Issue worker time window — hours (24h format, container timezone)
 # Omit both to run 24/7 (default). Set both to restrict issue processing.
 # issue_work_window_start: 0
 # issue_work_window_end: 8
 
-# GitHub App identity (optional — omit to post as your personal account)
+# GitHub App identity (recommended — posts as bot account instead of your personal account)
 # Installations are auto-discovered — just install the app on your accounts/orgs.
 # app_id: "12345"
 

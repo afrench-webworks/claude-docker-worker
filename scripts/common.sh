@@ -19,12 +19,12 @@ WIP_FILE="$STATE_DIR/wip.json"
 
 declare -a REPOS=()
 declare -a AUTHORIZED_USERS=()
-LABEL=""
 MENTION=""
 BOT_SIGNATURE=""
 GIT_BOT_NAME=""
 GIT_BOT_EMAIL=""
 APP_ID=""
+LABEL_PREFIX=""
 
 # Helper to parse a scalar value from config.yaml
 _parse_config_value() {
@@ -72,17 +72,15 @@ load_config() {
         AUTHORIZED_USERS+=("$user")
     done < <(_parse_yaml_list "authorized_users")
 
-    LABEL=$(_parse_config_value "label")
     MENTION=$(_parse_config_value "mention")
     BOT_SIGNATURE=$(_parse_config_value "bot_signature")
     GIT_BOT_NAME=$(_parse_config_value "git_bot_name")
     GIT_BOT_EMAIL=$(_parse_config_value "git_bot_email")
+    LABEL_PREFIX=$(_parse_config_value "label_prefix")
+    [[ -z "$LABEL_PREFIX" ]] && LABEL_PREFIX="dockworker"
+
     if [[ ${#REPOS[@]} -eq 0 ]]; then
         echo "[ERROR] No repos configured in $CONFIG_FILE"
-        return 1
-    fi
-    if [[ -z "$LABEL" ]]; then
-        echo "[ERROR] No label configured in $CONFIG_FILE"
         return 1
     fi
     if [[ ${#AUTHORIZED_USERS[@]} -eq 0 ]]; then
@@ -97,11 +95,8 @@ load_config() {
     # GitHub App config (optional — falls back to gh CLI auth if not set)
     APP_ID=$(_parse_config_value "app_id")
 
-    # Source the token script and discover installations
-    source "$SCRIPT_DIR/github-app-token.sh"
-    init_app_auth "$APP_ID" || {
-        echo "[WARN] GitHub App init failed, falling back to gh CLI auth"
-    }
+    # Auth is now handled by the Python GitHub module (scripts/dw_github/auth.py).
+    # Token injection into settings.json happens via: python3 -m dw_github.cli auth --owner <owner>
 
     # Discover installed plugins
     _discover_plugins

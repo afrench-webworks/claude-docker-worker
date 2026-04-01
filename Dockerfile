@@ -10,7 +10,12 @@ RUN apt-get update && apt-get install -y \
     git \
     jq \
     ca-certificates \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+# Python dependencies for the GitHub API module
+RUN pip3 install --break-system-packages PyGithub PyJWT cryptography pyyaml
 
 # Set timezone to America/Chicago (CST/CDT)
 RUN ln -sf /usr/share/zoneinfo/America/Chicago /etc/localtime \
@@ -36,6 +41,12 @@ RUN echo 'export PATH="$HOME/.local/bin:$PATH"' >> /root/.bashrc \
 COPY config.yaml /opt/issue-worker/config.yaml
 COPY scripts/ /opt/issue-worker/
 RUN chmod +x /opt/issue-worker/*.sh /opt/issue-worker/handlers/*.sh
+
+# Python module path — allows `python3 -m dw_github.cli` from anywhere
+ENV PYTHONPATH="/opt/issue-worker"
+RUN echo 'export PYTHONPATH="/opt/issue-worker"' >> /root/.bashrc \
+    && echo 'export PYTHONPATH="/opt/issue-worker"' >> /root/.profile \
+    && echo 'PYTHONPATH=/opt/issue-worker' >> /etc/environment
 
 # Cron schedule
 COPY crontab /etc/cron.d/issue-worker

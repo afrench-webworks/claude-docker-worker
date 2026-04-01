@@ -23,9 +23,20 @@ HANDLERS=("mentions" "issues")
 # Clean up stale readonly temp dirs (older than 1 hour)
 find "$WORK_DIR" -maxdepth 1 -name "readonly-*" -type d -mmin +60 -exec rm -rf {} \; 2>/dev/null
 
-for repo in "${REPOS[@]}"; do
-    set_app_token_for_repo "$repo"
+GITHUB_CLI="python3 -m dw_github.cli"
 
+for repo in "${REPOS[@]}"; do
+    # Authenticate via Python module
+    owner=$(echo "$repo" | cut -d'/' -f1)
+    $GITHUB_CLI auth --owner "$owner" 2>/dev/null || true
+
+    # Ensure dockworker labels exist (idempotent, runs every cycle)
+    $GITHUB_CLI ensure-labels --repo "$repo" 2>/dev/null || {
+        echo "[$(date -Iseconds)] WARN: Could not ensure labels for $repo (repo may not exist or auth failed), skipping"
+        continue
+    }
+
+    # --- WIP-gated handlers (mentions, issue implementation) ---
     for handler in "${HANDLERS[@]}"; do
         # Check work window
         window_fn="handler_${handler}_is_in_window"
@@ -50,4 +61,19 @@ for repo in "${REPOS[@]}"; do
         # One task per cycle
         exit 0
     done
+
+    # --- Issue evaluation (no WIP claim needed — lightweight, read-only triage) ---
+    # This runs even if the repo has active work (in-progress PR, etc.)
+    if declare -F "handler_issues_is_in_window" > /dev/null 2>&1; then
+        handler_issues_is_in_window || continue
+    fi
+
+    eval_task=$(handler_issues_find_evaluation "$repo" || true)
+    if [[ -n "$eval_task" ]]; then
+        echo "[$(date -Iseconds)] Evaluating unevaluated issue in $repo"
+        handler_issues_execute "$repo" "$eval_task" || true
+
+        # One task per cycle
+        exit 0
+    fi
 done

@@ -4,7 +4,7 @@ services:
     container_name: claude-docker-worker
     restart: always
     ports:
-      - "127.0.0.1:41922:22"   # Localhost only — not exposed to LAN
+      - "127.0.0.1:10022:22"   # Localhost only — not exposed to LAN
     environment:
       - SSH_AUTHORIZED_KEY=${SSH_AUTHORIZED_KEY:-}
       - TZ=America/Chicago
