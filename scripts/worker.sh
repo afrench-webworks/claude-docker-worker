@@ -36,6 +36,9 @@ for repo in "${REPOS[@]}"; do
         continue
     }
 
+    # Lifecycle check: transition pr-open → done when PRs are merged/closed
+    $GITHUB_CLI check-pr-lifecycle --repo "$repo" 2>/dev/null || true
+
     # --- WIP-gated handlers (mentions, issue implementation) ---
     for handler in "${HANDLERS[@]}"; do
         # Check work window
@@ -58,8 +61,8 @@ for repo in "${REPOS[@]}"; do
         "handler_${handler}_execute" "$repo" "$task" || true
         clear_repo_wip "$repo"
 
-        # One task per cycle
-        exit 0
+        # One task per repo per cycle
+        break
     done
 
     # --- Issue evaluation (no WIP claim needed — lightweight, read-only triage) ---
@@ -73,7 +76,7 @@ for repo in "${REPOS[@]}"; do
         echo "[$(date -Iseconds)] Evaluating unevaluated issue in $repo"
         handler_issues_execute "$repo" "$eval_task" || true
 
-        # One task per cycle
-        exit 0
+        # One task per repo per cycle
+        continue
     fi
 done

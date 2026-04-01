@@ -166,6 +166,95 @@ def mark_evaluated(
     remove_label(issue, config.label("evaluating"))
 
 
+def check_pr_lifecycle(gh: Github, repo_name: str, config: WorkerConfig) -> list[dict]:
+    """Check issues with dockworker:pr-open and transition to done if the PR is merged/closed.
+
+    Finds all open issues with the pr-open label, looks for a linked PR
+    (via the processed-issues state or by scanning for a claude/issue-N branch PR),
+    and if that PR is merged or closed, transitions the issue to dockworker:done.
+
+    Returns a list of transitions made (for logging).
+    """
+    from pathlib import Path
+
+    repo = gh.get_repo(repo_name)
+    pr_open_label = config.label("pr-open")
+    transitions = []
+
+    try:
+        label_obj = repo.get_label(pr_open_label)
+    except Exception:
+        return transitions
+
+    # Load processed-issues state for PR URL lookups (open issues only)
+    state_file = Path("/root/workspace/.issue-worker/state/processed-issues.json")
+    processed_state = {}
+    if state_file.exists():
+        try:
+            processed_state = json.loads(state_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Check both open and closed issues — GitHub auto-closes issues
+    # via "Fixes #N" syntax, so pr-open may be on closed issues too.
+    for state in ("open", "closed"):
+        issues = repo.get_issues(state=state, labels=[label_obj])
+
+        for issue in issues:
+            if issue.pull_request:
+                continue
+
+            if state == "closed":
+                # Issue already closed (e.g., via "Fixes #N") — just swap the label
+                add_label(issue, config.label("done"))
+                remove_label(issue, config.label("pr-open"))
+                transitions.append({
+                    "issue": issue.number,
+                    "status": "closed",
+                })
+                continue
+
+            # Open issue — check if the linked PR has been merged/closed
+            pr = _find_linked_pr(repo, repo_name, issue.number, processed_state)
+            if pr is None:
+                continue
+
+            if pr.merged or pr.state == "closed":
+                add_label(issue, config.label("done"))
+                remove_label(issue, config.label("pr-open"))
+                status = "merged" if pr.merged else "closed"
+                transitions.append({
+                    "issue": issue.number,
+                    "pr": pr.number,
+                    "status": status,
+                })
+
+    return transitions
+
+
+def _find_linked_pr(repo, repo_name: str, issue_number: int, processed: dict):
+    """Find the PR linked to an issue, via state file or branch convention."""
+    # Check processed-issues state for a stored PR URL
+    state_key = f"{repo_name}#{issue_number}"
+    issue_state = processed.get(state_key, {})
+    if isinstance(issue_state, dict):
+        pr_url = issue_state.get("pr_url", "")
+        if pr_url:
+            # Extract PR number from URL (e.g., .../pull/8)
+            try:
+                pr_number = int(pr_url.rstrip("/").split("/")[-1])
+                return repo.get_pull(pr_number)
+            except (ValueError, Exception):
+                pass
+
+    # Fall back to branch naming convention: claude/issue-N
+    branch_name = f"claude/issue-{issue_number}"
+    for pr in repo.get_pulls(state="all", head=f"{repo.owner.login}:{branch_name}"):
+        return pr
+
+    return None
+
+
 def post_comment(gh: Github, repo_name: str, issue_number: int, body: str) -> None:
     """Post a comment on an issue."""
     repo = gh.get_repo(repo_name)

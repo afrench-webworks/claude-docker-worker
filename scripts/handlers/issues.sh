@@ -315,8 +315,11 @@ _execute_issue_evaluation() {
 
     # Ask Claude to evaluate the issue
     local claude_output
-    claude_output=$(claude --model opus -p "You are an automated assistant evaluating a GitHub issue for readiness.
+    # shellcheck disable=SC2086
+    claude_output=$(claude --model opus $CLAUDE_PLUGIN_FLAGS -p "You are an automated assistant evaluating a GitHub issue for readiness.
 Your job is to determine if this issue is ready for an AI developer to implement.
+You are inside a read-only copy of the repository and have full access to explore
+the codebase using read, grep, glob, and other tools.
 
 Repository: $repo
 Issue #$issue_number
@@ -324,21 +327,32 @@ Issue #$issue_number
 Full issue context:
 $full_context
 
-Evaluate this issue and respond with EXACTLY ONE of these verdicts on the FIRST LINE
-of your response, followed by your reasoning:
+Instructions:
+1. Read the issue carefully and understand what is being requested.
+2. Explore the repository to understand the relevant code, architecture, and files
+   that would be affected. Look at the specific files, functions, or components
+   mentioned in the issue. If none are mentioned, search for code related to the
+   issue's topic.
+3. Assess whether the issue is clear and actionable based on both the issue
+   description AND what you find in the codebase.
 
-READY — The issue is clear, specific, and actionable. An AI developer could implement
-it without needing additional information.
+Respond with EXACTLY ONE of these verdicts on the FIRST LINE of your response,
+followed by your reasoning:
+
+READY — The issue is clear, specific, and actionable. You can identify the relevant
+files and understand what changes are needed. An AI developer could implement it
+without needing additional information.
 
 NEEDS_INFO — The issue needs clarification before work can begin. After your reasoning,
 include a section titled 'Questions:' with specific questions that need answers.
+Reference specific files or code you looked at that informed your questions.
 
 SKIP — The issue is not suitable for AI implementation (e.g., requires human judgment,
 access to external systems, is a discussion/question, or is too vague to act on).
 
-Your reasoning should address:
+Your reasoning should reference specific files and code you explored, and address:
 - Is the desired outcome clearly described?
-- Are there specific files, components, or areas of the codebase identified?
+- Which files or components would need to change?
 - Is the scope manageable for a single implementation pass?
 - Are there any blockers or dependencies that need human intervention?" 2>&1) || {
         echo "[$(date -Iseconds)] ERROR: Claude evaluation failed for $repo#$issue_number"
@@ -359,7 +373,9 @@ Your reasoning should address:
             echo "[$(date -Iseconds)] Issue $repo#$issue_number evaluated as READY"
             $GITHUB_CLI mark-issue --repo "$repo" --issue "$issue_number" --state ready 2>/dev/null
             $GITHUB_CLI comment --repo "$repo" --issue "$issue_number" \
-                --body "I've evaluated this issue and it looks ready for implementation. I'll pick it up on a future work cycle.
+                --body "I've evaluated this issue and it's ready for implementation.
+
+$(echo "$claude_output" | tail -n +2)
 
 ${BOT_SIGNATURE}" 2>/dev/null
             ;;

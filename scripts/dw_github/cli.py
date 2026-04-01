@@ -92,6 +92,19 @@ def cmd_check_active(args: argparse.Namespace) -> None:
     print(json.dumps({"active": active}))
 
 
+def cmd_check_pr_lifecycle(args: argparse.Namespace) -> None:
+    """Check pr-open issues and transition to done if PR is merged/closed."""
+    config = load_config()
+    factory = GitHubClientFactory(config)
+    owner = args.repo.split("/")[0]
+    gh = factory.get_client(owner)
+
+    from .issues import check_pr_lifecycle
+
+    transitions = check_pr_lifecycle(gh, args.repo, config)
+    print(json.dumps({"status": "ok", "transitions": transitions}))
+
+
 def cmd_ensure_labels(args: argparse.Namespace) -> None:
     """Ensure all dockworker:* labels exist in a repo."""
     config = load_config()
@@ -243,6 +256,10 @@ def main() -> None:
     p = sub.add_parser("check-active", help="Check if repo has active work")
     p.add_argument("--repo", required=True)
 
+    # check-pr-lifecycle
+    p = sub.add_parser("check-pr-lifecycle", help="Transition pr-open issues to done if PR merged/closed")
+    p.add_argument("--repo", required=True)
+
     # ensure-labels
     p = sub.add_parser("ensure-labels", help="Ensure dockworker labels exist")
     p.add_argument("--repo", required=True)
@@ -297,6 +314,7 @@ def main() -> None:
         "find-issue": cmd_find_issue,
         "find-unevaluated": cmd_find_unevaluated,
         "check-active": cmd_check_active,
+        "check-pr-lifecycle": cmd_check_pr_lifecycle,
         "ensure-labels": cmd_ensure_labels,
         "comment": cmd_comment,
         "label": cmd_label,
