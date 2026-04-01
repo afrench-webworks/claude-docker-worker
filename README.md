@@ -14,7 +14,7 @@ Work is organized into pluggable **handlers**, each with a priority and optional
 
 - **Mentions** (priority 10, 24/7) — Scans for `@dockworker` mentions across issue comments, PR conversations, inline code reviews, and review summaries. Responds with analysis grounded in the actual codebase. On PRs with a branch, can make code changes and push commits in response to feedback.
 
-- **Issues** (priority 20, 24/7 by default) — Picks up new issues with the trigger label, creates a branch, invokes Claude Code to implement changes, and opens a PR. Optionally restricted to a time window via `issue_work_window_start`/`issue_work_window_end` in config.
+- **Issues** (priority 20, 24/7 by default) — Evaluates new issues for AI readiness, then implements `dockworker:ready` issues by creating a branch, invoking Claude Code, and opening a PR. Only one issue per repo is worked on at a time. Optionally restricted to a time window via `issue_work_window_start`/`issue_work_window_end` in config.
 
 Mentions always take priority over issues. The worker is silent when there's nothing to do. Per-repo WIP tracking allows concurrent work across different repos — a long-running issue implementation on repo A won't block mention responses on repo B. State is tracked in JSON files on a persistent volume.
 
@@ -54,10 +54,21 @@ claude-docker-worker/
 └── scripts/
     ├── common.sh            # Shared utilities (config, state, locking, WIP, logging)
     ├── worker.sh            # Unified work loop — one cron job, one task per cycle
-    ├── github-app-token.sh  # GitHub App JWT auth with auto-discovery
-    └── handlers/
-        ├── mentions.sh      # Mention response handler (priority 10, 24/7)
-        └── issues.sh        # Issue implementation handler (priority 20, work window)
+    ├── dw_github/           # Python GitHub API module (PyGithub)
+    │   ├── auth.py          # GitHub App JWT auth + personal token fallback
+    │   ├── client.py        # Authenticated PyGithub client factory
+    │   ├── cli.py           # CLI entry points (called from bash handlers)
+    │   ├── config.py        # YAML config loader
+    │   ├── issues.py        # Issue scanning, evaluation, label management
+    │   ├── labels.py        # dockworker:* label system
+    │   ├── mentions.py      # Mention scanning across PRs and issues
+    │   └── pulls.py         # Pull request operations
+    ├── handlers/
+    │   ├── mentions.sh      # Mention response handler (priority 10, 24/7)
+    │   └── issues.sh        # Issue handler (priority 20) — work + evaluation
+    └── prompts/
+        ├── respond-on-branch.md
+        └── respond-readonly.md
 ```
 
 ## Manual Setup
@@ -77,11 +88,13 @@ repos:
   - owner/repo-name
   - org/another-repo
 
-label: claude-task
 mention: "@dockworker"
 bot_signature: "— 🚢 Claude Dockworker"
 git_bot_name: "claude-docker-worker"
 git_bot_email: "claude-docker-worker@noreply.github.com"
+
+# label_prefix: dockworker    # Controls dockworker:* label names (default: dockworker)
+# app_id: "12345"             # GitHub App ID for bot identity
 ```
 
 ### 2. Build
@@ -161,7 +174,7 @@ Tag `@dockworker` in any comment on a monitored repo to get a response:
 
 ### Issue Worker
 
-Create an issue with the trigger label (default: `claude-task`) on a monitored repo. The issue worker picks it up during the work window (midnight-8 AM by default), implements changes, and opens a PR.
+Create an issue on a monitored repo. The worker automatically evaluates it for AI readiness and labels it `dockworker:ready`, `dockworker:needs-info`, or `dockworker:skip`. Ready issues are picked up for implementation — the worker creates a branch, implements changes, and opens a PR. Only one issue per repo is actively worked on at a time; evaluation continues regardless.
 
 ### Manual Runs
 
@@ -229,11 +242,11 @@ No need to re-inject SSH keys or re-authenticate — all credentials live in nam
 |---|---|
 | `repos` | List of `owner/repo` strings to monitor |
 | `authorized_users` | GitHub usernames allowed to trigger the bot via mentions |
-| `label` | GitHub label that triggers the issue worker (e.g., `claude-task`) |
 | `mention` | Handle that triggers the comment monitor (e.g., `@dockworker`) |
 | `bot_signature` | Appended to every comment posted by the bot |
 | `git_bot_name` | Git committer name for automated commits |
 | `git_bot_email` | Git committer email for automated commits |
+| `label_prefix` | *(Optional)* Prefix for workflow labels (default: `dockworker`). Labels created: `dockworker:ready`, `dockworker:evaluating`, `dockworker:needs-info`, `dockworker:in-progress`, `dockworker:pr-open`, `dockworker:done`, `dockworker:failed`, `dockworker:skip` |
 | `app_id` | *(Optional)* GitHub App ID — enables posting as a bot identity instead of your personal account. Installations are auto-discovered at runtime. |
 | `issue_work_window_start` | *(Optional)* Hour (24h format) when issue processing begins. Omit to run 24/7. |
 | `issue_work_window_end` | *(Optional)* Hour (24h format) when issue processing stops. Omit to run 24/7. |
