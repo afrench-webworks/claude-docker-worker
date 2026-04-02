@@ -147,12 +147,12 @@ _execute_issue_work() {
         full_context="{\"title\": \"$issue_title\", \"body\": \"\"}"
     }
 
-    echo "[$(date -Iseconds)] Invoking Claude Code (Opus 4.6)"
+    echo "[$(date -Iseconds)] Invoking Claude Code ($CLAUDE_ISSUE_WORK_FLAGS)"
 
     # Invoke Claude Code to implement the changes
     local claude_output
     # shellcheck disable=SC2086
-    claude_output=$(claude --model opus $CLAUDE_PLUGIN_FLAGS -p "You are an automated developer working inside a cloned repository.
+    claude_output=$(claude $CLAUDE_ISSUE_WORK_FLAGS $CLAUDE_PLUGIN_FLAGS -p "You are an automated developer working inside a cloned repository.
 Your job is to implement changes for a GitHub issue. You have full access to the
 codebase and all standard tools (read, write, edit, grep, glob, bash).
 
@@ -316,7 +316,7 @@ _execute_issue_evaluation() {
     # Ask Claude to evaluate the issue
     local claude_output
     # shellcheck disable=SC2086
-    claude_output=$(claude --model opus $CLAUDE_PLUGIN_FLAGS -p "You are an automated assistant evaluating a GitHub issue for readiness.
+    claude_output=$(claude $CLAUDE_ISSUE_EVAL_FLAGS $CLAUDE_PLUGIN_FLAGS -p "You are an automated assistant evaluating a GitHub issue for readiness.
 Your job is to determine if this issue is ready for an AI developer to implement.
 You are inside a read-only copy of the repository and have full access to explore
 the codebase using read, grep, glob, and other tools.

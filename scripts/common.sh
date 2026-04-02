@@ -25,6 +25,9 @@ GIT_BOT_NAME=""
 GIT_BOT_EMAIL=""
 APP_ID=""
 LABEL_PREFIX=""
+CLAUDE_ISSUE_EVAL_FLAGS=""
+CLAUDE_ISSUE_WORK_FLAGS=""
+CLAUDE_MENTION_REPLY_FLAGS=""
 
 # Helper to parse a scalar value from config.yaml
 _parse_config_value() {
@@ -38,6 +41,45 @@ _parse_config_value() {
         raw="${raw:1:${#raw}-2}"
     fi
     echo "$raw"
+}
+
+# Parse a value from nested YAML (3 levels: section > subsection > key)
+# Usage: _parse_nested_config "claude" "issue_evaluation" "model"
+_parse_nested_config() {
+    local section="$1"
+    local subsection="$2"
+    local key="$3"
+    awk -v section="$section" -v subsection="$subsection" -v key="$key" '
+        BEGIN { in_sec=0; in_sub=0 }
+        /^[^ #]/ { in_sec=0; in_sub=0 }
+        $0 ~ "^" section ":" { in_sec=1; next }
+        in_sec && /^  [^ #]/ { in_sub=0 }
+        in_sec && $0 ~ "^  " subsection ":" { in_sub=1; next }
+        in_sub && $0 ~ "^    " key ":" {
+            val = $0
+            sub(/^    [^:]+:[[:space:]]*/, "", val)
+            sub(/[[:space:]]*#.*$/, "", val)
+            if (val ~ /^".*"$/) val = substr(val, 2, length(val)-2)
+            if (val ~ /^'"'"'.*'"'"'$/) val = substr(val, 2, length(val)-2)
+            print val
+            exit
+        }
+    ' "$CONFIG_FILE"
+}
+
+# Build Claude CLI flags (--model, --effort) for a given task type
+_claude_flags_for() {
+    local task_type="$1"
+    local model effort flags
+
+    model=$(_parse_nested_config "claude" "$task_type" "model")
+    [[ -z "$model" ]] && model="opus"
+    flags="--model $model"
+
+    effort=$(_parse_nested_config "claude" "$task_type" "effort")
+    [[ -n "$effort" ]] && flags="$flags --effort $effort"
+
+    echo "$flags"
 }
 
 load_config() {
@@ -97,6 +139,11 @@ load_config() {
 
     # Auth is now handled by the Python GitHub module (scripts/dw_github/auth.py).
     # Token injection into settings.json happens via: python3 -m dw_github.cli auth --owner <owner>
+
+    # Claude settings per task type (model + effort)
+    CLAUDE_ISSUE_EVAL_FLAGS=$(_claude_flags_for "issue_evaluation")
+    CLAUDE_ISSUE_WORK_FLAGS=$(_claude_flags_for "issue_work")
+    CLAUDE_MENTION_REPLY_FLAGS=$(_claude_flags_for "mention_reply")
 
     # Discover installed plugins
     _discover_plugins

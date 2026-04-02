@@ -24,6 +24,20 @@ git_bot_email: "claude-docker-worker@noreply.github.com"
 # Installations are auto-discovered — just install the app on your accounts/orgs.
 # app_id: "12345"
 
+# Claude settings — model and effort per task type
+# model: opus, sonnet, haiku (default: opus)
+# effort: low, medium, high, max (default: unset, uses Claude's default)
+# claude:
+#   issue_evaluation:
+#     model: sonnet
+#     effort: high
+#   issue_work:
+#     model: opus
+#     effort: max
+#   mention_reply:
+#     model: opus
+#     effort: high
+
 # Plugins — Claude Code plugins are auto-discovered from
 # ~/.claude/plugins/installed_plugins.json (on the claude-config volume).
 # Install plugins on your host machine, then restart the container.
