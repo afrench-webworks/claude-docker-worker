@@ -56,57 +56,101 @@ def repo_has_active_work(gh: Github, repo_name: str, config: WorkerConfig) -> bo
     return False
 
 
-def find_ready_issue(gh: Github, repo_name: str, config: WorkerConfig) -> IssueTask | None:
-    """Find the oldest open issue with dockworker:ready label."""
-    repo = gh.get_repo(repo_name)
-    ready_label = config.label("ready")
-
-    try:
-        label_obj = repo.get_label(ready_label)
-    except Exception:
-        return None
-
-    issues = repo.get_issues(
-        state="open",
-        labels=[label_obj],
-        sort="created",
-        direction="asc",
-    )
-
+def _first_matching(issues, *, task_type: str, predicate=None) -> IssueTask | None:
+    """Return the first non-PR issue matching an optional predicate."""
     for issue in issues:
         if issue.pull_request:
             continue
+        if predicate and not predicate(issue):
+            continue
         return IssueTask(
-            type="issue",
+            type=task_type,
             issue_number=issue.number,
             issue_title=issue.title,
             issue_body=issue.body or "",
         )
-
     return None
+
+
+def find_ready_issue(gh: Github, repo_name: str, config: WorkerConfig) -> IssueTask | None:
+    """Find the oldest open issue with dockworker:ready label.
+
+    Bug-labeled issues are prioritized — the oldest ready bug is returned
+    before any non-bug ready issue.
+    """
+    repo = gh.get_repo(repo_name)
+
+    try:
+        ready_label_obj = repo.get_label(config.label("ready"))
+    except Exception:
+        return None
+
+    # Priority pass: oldest ready issue with a "bug" label
+    try:
+        bug_label_obj = repo.get_label("bug")
+        result = _first_matching(
+            repo.get_issues(
+                state="open",
+                labels=[ready_label_obj, bug_label_obj],
+                sort="created",
+                direction="asc",
+            ),
+            task_type="issue",
+        )
+        if result:
+            return result
+    except Exception:
+        pass  # No "bug" label in repo — skip priority pass
+
+    # Standard pass: oldest ready issue
+    return _first_matching(
+        repo.get_issues(
+            state="open",
+            labels=[ready_label_obj],
+            sort="created",
+            direction="asc",
+        ),
+        task_type="issue",
+    )
 
 
 def find_unevaluated_issue(gh: Github, repo_name: str, config: WorkerConfig) -> IssueTask | None:
-    """Find the oldest open issue with NO dockworker:* labels."""
+    """Find the oldest open issue with NO dockworker:* labels.
+
+    Bug-labeled issues are prioritized — the oldest unevaluated bug is
+    returned before any non-bug unevaluated issue.
+    """
     repo = gh.get_repo(repo_name)
-    issues = repo.get_issues(
-        state="open",
-        sort="created",
-        direction="asc",
+    no_dw = lambda issue: not has_any_dockworker_label(issue, config)
+
+    # Priority pass: oldest bug-labeled issue without dockworker labels
+    try:
+        bug_label_obj = repo.get_label("bug")
+        result = _first_matching(
+            repo.get_issues(
+                state="open",
+                labels=[bug_label_obj],
+                sort="created",
+                direction="asc",
+            ),
+            task_type="evaluate",
+            predicate=no_dw,
+        )
+        if result:
+            return result
+    except Exception:
+        pass  # No "bug" label in repo — skip priority pass
+
+    # Standard pass: oldest issue without dockworker labels
+    return _first_matching(
+        repo.get_issues(
+            state="open",
+            sort="created",
+            direction="asc",
+        ),
+        task_type="evaluate",
+        predicate=no_dw,
     )
-
-    for issue in issues:
-        if issue.pull_request:
-            continue
-        if not has_any_dockworker_label(issue, config):
-            return IssueTask(
-                type="evaluate",
-                issue_number=issue.number,
-                issue_title=issue.title,
-                issue_body=issue.body or "",
-            )
-
-    return None
 
 
 def get_full_issue_context(gh: Github, repo_name: str, issue_number: int) -> dict:
