@@ -37,6 +37,10 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 RUN echo 'export PATH="$HOME/.local/bin:$PATH"' >> /root/.bashrc \
     && echo 'export PATH="$HOME/.local/bin:$PATH"' >> /root/.profile
 
+# Claude Code permissions — base allowlist (auth module adds GH_TOKEN at runtime)
+RUN mkdir -p /root/.claude
+COPY settings.json.example /root/.claude/settings.json
+
 # Issue worker scripts and config
 COPY config.yaml /opt/issue-worker/config.yaml
 COPY scripts/ /opt/issue-worker/

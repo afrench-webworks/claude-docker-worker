@@ -24,7 +24,12 @@
       "Bash(node *)",
       "Bash(which *)",
       "Bash(echo *)",
-      "Bash(gh *)"
+      "Bash(gh *)",
+      "Bash(python3 *)",
+      "Bash(pip3 *)",
+      "Bash(pytest *)",
+      "Bash(pip *)",
+      "Bash(python *)"
     ],
     "deny": []
   }
