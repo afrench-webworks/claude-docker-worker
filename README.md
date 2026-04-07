@@ -4,19 +4,18 @@
   <img src="claude-dockworker.png" alt="Claude Dockworker" width="400">
 </p>
 
-An always-on Docker container that autonomously works GitHub Issues using Claude Code (Opus). It responds to `@dockworker` mentions with repo-aware analysis, implements changes, opens pull requests, and addresses review feedback — all without human intervention.
+An always-on Docker container for running Claude Code autonomously. Pick the features you need — GitHub issue automation, Python development tooling, or your own custom stack — and the build system composes them into a single container.
 
-## How It Works
+## Features
 
-A single unified worker (`worker.sh`) runs every 5 minutes via cron inside an Ubuntu 24.04 container. Each cycle, it scans all configured repos for actionable work, picks the highest-priority task, and executes it. Processes one task per cycle.
+Features are self-contained modules in `features/`. Enable the ones you want in `features.conf` and the build system handles the rest.
 
-Work is organized into pluggable **handlers**, each with a priority and optional time window:
+| Feature | Description |
+|---|---|
+| **[github-worker](features/github-worker/)** | Autonomous GitHub issue triage, implementation, and `@mention` response |
+| **[python-dev](features/python-dev/)** | Python development environment with pytest, black, ruff, mypy, poetry |
 
-- **Mentions** (priority 10, 24/7) — Scans for `@dockworker` mentions across issue comments, PR conversations, inline code reviews, and review summaries. Responds with analysis grounded in the actual codebase. On PRs with a branch, can make code changes and push commits in response to feedback.
-
-- **Issues** (priority 20, 24/7 by default) — Evaluates new issues for AI readiness, then implements `dockworker:ready` issues by creating a branch, invoking Claude Code, and opening a PR. Only one issue per repo is worked on at a time. Optionally restricted to a time window via `issue_work_window_start`/`issue_work_window_end` in config.
-
-Mentions always take priority over issues. The worker is silent when there's nothing to do. Per-repo WIP tracking allows concurrent work across different repos — a long-running issue implementation on repo A won't block mention responses on repo B. State is tracked in JSON files on a persistent volume.
+Create your own with `claude` then `/new-feature`.
 
 ## Quick Setup
 
@@ -27,83 +26,85 @@ claude
 /setup
 ```
 
-The slash command walks through the entire setup interactively.
+The slash command walks through everything: feature selection, configuration, build, auth.
 
 ## Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
+- [jq](https://github.com/jqlang/jq/releases) on the host (used by the build script)
 - An SSH keypair on the host machine
 - A [Claude](https://claude.ai) account (Max or Team plan) for Claude Code authentication
-- A [GitHub](https://github.com) account with access to the repos you want to monitor
 
 ## Project Structure
 
 ```
 claude-docker-worker/
+├── core/
+│   ├── Dockerfile.base         # Ubuntu 24.04 + Claude Code + SSH + cron
+│   ├── entrypoint.sh           # Boot-time setup with feature hook runner
+│   └── settings.json.base      # Universal Claude Code permissions
+├── features/
+│   ├── github-worker/          # GitHub automation feature
+│   │   ├── feature.yaml        # Manifest (name, description, dependencies)
+│   │   ├── Dockerfile.snippet  # Installs gh CLI, Python GitHub module
+│   │   ├── settings.snippet.json
+│   │   ├── crontab.snippet
+│   │   ├── config.snippet.yaml.example
+│   │   ├── entrypoint.d/
+│   │   ├── setup.md
+│   │   └── scripts/            # Worker scripts, handlers, prompts
+│   └── python-dev/             # Python tooling feature
+│       ├── feature.yaml
+│       ├── Dockerfile.snippet
+│       └── settings.snippet.json
+├── build/
+│   └── assemble.sh             # Composes core + features into build artifacts
+├── .generated/                 # Output of assemble.sh (gitignored)
+├── features.conf               # Your enabled features (gitignored)
+├── features.conf.example       # Template listing all available features
 ├── .claude/commands/
-│   └── setup.md            # Interactive setup slash command for Claude Code
-├── .gitattributes           # Enforces LF line endings for shell scripts
-├── .gitignore               # Excludes config.yaml and private keys
-├── Dockerfile               # Ubuntu 24.04 + Claude Code + gh CLI + cron + SSH
-├── README.md
-├── config.yaml.example      # Template — copy to config.yaml and customize
-├── crontab                  # Cron schedule for unified worker + token keep-alive
-├── docker-compose.yml       # Container config with named volumes
-├── entrypoint.sh            # Boot-time setup (SSH keys, git auth, lock/WIP cleanup, cron)
-├── settings.json.example    # Claude Code permissions — copied into container during setup
-└── scripts/
-    ├── common.sh            # Shared utilities (config, state, locking, WIP, logging)
-    ├── worker.sh            # Unified work loop — one cron job, one task per cycle
-    ├── dw_github/           # Python GitHub API module (PyGithub)
-    │   ├── auth.py          # GitHub App JWT auth + personal token fallback
-    │   ├── client.py        # Authenticated PyGithub client factory
-    │   ├── cli.py           # CLI entry points (called from bash handlers)
-    │   ├── config.py        # YAML config loader
-    │   ├── issues.py        # Issue scanning, evaluation, label management
-    │   ├── labels.py        # dockworker:* label system
-    │   ├── mentions.py      # Mention scanning across PRs and issues
-    │   └── pulls.py         # Pull request operations
-    ├── handlers/
-    │   ├── mentions.sh      # Mention response handler (priority 10, 24/7)
-    │   └── issues.sh        # Issue handler (priority 20) — work + evaluation
-    └── prompts/
-        ├── respond-on-branch.md
-        └── respond-readonly.md
+│   ├── setup.md                # Interactive setup wizard
+│   └── new-feature.md          # Interactive feature scaffolding
+├── build.sh                    # Convenience: assemble + docker compose build
+├── run.sh                      # Convenience: assemble + build + start
+├── docker-compose.yml
+└── Dockerfile                  # Generated by assemble.sh
 ```
 
 ## Manual Setup
 
-If not using the `/setup` slash command:
-
-### 1. Configure
-
-Copy the example config and edit it:
+### 1. Select Features
 
 ```bash
-cp config.yaml.example config.yaml
+cp features.conf.example features.conf
 ```
 
-```yaml
-repos:
-  - owner/repo-name
-  - org/another-repo
+Edit `features.conf` — uncomment the features you want.
 
-mention: "@dockworker"
-bot_signature: "— 🚢 Claude Dockworker"
-git_bot_name: "claude-docker-worker"
-git_bot_email: "claude-docker-worker@noreply.github.com"
-
-# label_prefix: dockworker    # Controls dockworker:* label names (default: dockworker)
-# app_id: "12345"             # GitHub App ID for bot identity
-```
-
-### 2. Build
+### 2. Assemble and Configure
 
 ```bash
-docker compose build
+bash build/assemble.sh
 ```
 
-### 3. First Boot
+This generates the Dockerfile, settings.json, crontab, and config from your enabled features. If a feature has configuration, its `config.snippet.yaml` is created from the example automatically.
+
+Edit each feature's config with your values:
+
+```bash
+# Example: configure the GitHub worker
+vi features/github-worker/config.snippet.yaml
+```
+
+### 3. Build
+
+```bash
+bash build.sh
+```
+
+Or manually: `bash build/assemble.sh && docker compose build`
+
+### 4. First Boot
 
 Inject your SSH public key so you can SSH into the container:
 
@@ -119,29 +120,21 @@ $env:SSH_AUTHORIZED_KEY = ""
 SSH_AUTHORIZED_KEY="$(cat ~/.ssh/id_ed25519.pub)" docker compose up -d
 ```
 
-Replace the key path with your actual public key file. The key is written to a persistent volume — subsequent starts don't need it.
+The key is written to a persistent volume — subsequent starts don't need it.
 
-### 4. Add SSH Config Entry
+### 5. Add SSH Config Entry
 
-Add this to your `~/.ssh/config`:
+Add to `~/.ssh/config`:
 
 ```
 Host claude-docker-worker
     HostName 127.0.0.1
-    Port 41922
+    Port 10022
     User root
     IdentityFile ~/.ssh/id_ed25519
 ```
 
 Adjust the port and key path to match your setup.
-
-### 5. Install Claude Code Permissions
-
-```bash
-docker cp settings.json.example claude-docker-worker:/root/.claude/settings.json
-```
-
-This configures which tools Claude Code can use in non-interactive mode. Claude handles its own GitHub commenting via `gh`, so `Bash(gh *)` is in the allow list.
 
 ### 6. Authenticate Claude Code
 
@@ -150,79 +143,35 @@ ssh claude-docker-worker
 claude auth login --headless
 ```
 
-Open the printed URL in your browser, complete OAuth, and paste the code back. The token is stored on a persistent volume and survives rebuilds.
+Open the URL in your browser, complete OAuth, and paste the code back. The token is stored on a persistent volume and survives rebuilds.
 
-### 7. Authenticate GitHub CLI
+### 7. Feature-Specific Setup
 
-Still inside the container:
+Each feature may have additional setup steps (e.g., GitHub App creation, CLI authentication). See the feature's own README for details.
 
+## Convenience Scripts
+
+| Script | What it does |
+|---|---|
+| `bash build.sh` | Assemble features + build Docker image |
+| `bash run.sh` | Assemble + build + start container |
+
+## Changing Config Later
+
+**Runtime settings** (repos, users, work windows):
 ```bash
-gh auth login
-gh auth setup-git
+# Edit the feature's config snippet
+vi features/github-worker/config.snippet.yaml
+bash build.sh && docker compose up -d
 ```
 
-## Usage
-
-### Mentioning the Bot
-
-Tag `@dockworker` in any comment on a monitored repo to get a response:
-
-- **On an issue** — researches the codebase and responds with grounded analysis
-- **On a PR conversation** — if the PR has a `claude/*` branch, can make code changes and push
-- **On an inline code review** — addresses the specific review feedback with file-level context
-- **On a review summary** — responds to "request changes" feedback
-
-### Issue Worker
-
-Create an issue on a monitored repo. The worker automatically evaluates it for AI readiness and labels it `dockworker:ready`, `dockworker:needs-info`, or `dockworker:skip`. Ready issues are picked up for implementation — the worker creates a branch, implements changes, and opens a PR. Only one issue per repo is actively worked on at a time; evaluation continues regardless.
-
-### Manual Runs
-
-SSH into the container and run the worker directly:
-
+**Adding or removing features:**
 ```bash
-ssh claude-docker-worker
-/opt/issue-worker/worker.sh
+# Edit features.conf
+bash run.sh
 ```
 
-### Check Logs
-
-```bash
-# Cron output
-cat /root/workspace/.issue-worker/logs/cron.log
-
-# Worker daily log
-cat /root/workspace/.issue-worker/logs/worker-$(date +%Y-%m-%d).log
-```
-
-The worker produces zero log output on quiet cycles. Logs are rotated on boot (older than 30 days are deleted).
-
-### Check State
-
-```bash
-# Which issues have been processed
-cat /root/workspace/.issue-worker/state/processed-issues.json
-
-# Which mentions have been handled
-cat /root/workspace/.issue-worker/state/handled-mentions.json
-```
-
-### Reprocess an Issue
-
-Remove its entry from the state file:
-
-```bash
-jq 'del(.["owner/repo#42"])' /root/workspace/.issue-worker/state/processed-issues.json > /tmp/pi.json \
-  && mv /tmp/pi.json /root/workspace/.issue-worker/state/processed-issues.json
-```
-
-### Rebuild After Config or Script Changes
-
-```bash
-docker compose build && docker compose up -d
-```
-
-No need to re-inject SSH keys or re-authenticate — all credentials live in named volumes. Scripts and config are baked into the image at build time, so changes to files in `scripts/`, `config.yaml`, or `crontab` require a rebuild.
+No need to re-inject SSH keys or re-authenticate — all credentials live in named volumes. Feature configs persist in their own directories, so disabling a feature doesn't lose your settings.
 
 ## Volumes
 
@@ -232,45 +181,38 @@ No need to re-inject SSH keys or re-authenticate — all credentials live in nam
 | `gh-config` | `/root/.config/gh` | GitHub CLI credentials |
 | `ssh-host-keys` | `/etc/ssh` | SSH host keys (stable fingerprint across rebuilds) |
 | `ssh-authorized-keys` | `/root/.ssh` | Authorized public keys for SSH access |
-| `workspace` | `/root/workspace` | Worker state, logs, repo clones |
+| `workspace` | `/root/workspace` | Feature state, logs, repo clones |
 
-## Configuration Reference
+## Creating a Feature
 
-### config.yaml
+Features are self-contained directories in `features/<name>/` with a standardized file layout. The easiest way to create one:
 
-| Key | Description |
+```
+claude
+/new-feature
+```
+
+Or manually create a directory with any combination of these files:
+
+| File | Purpose |
 |---|---|
-| `repos` | List of `owner/repo` strings to monitor |
-| `authorized_users` | GitHub usernames allowed to trigger the bot via mentions |
-| `mention` | Handle that triggers the comment monitor (e.g., `@dockworker`) |
-| `bot_signature` | Appended to every comment posted by the bot |
-| `git_bot_name` | Git committer name for automated commits |
-| `git_bot_email` | Git committer email for automated commits |
-| `label_prefix` | *(Optional)* Prefix for workflow labels (default: `dockworker`). Labels created: `dockworker:ready`, `dockworker:evaluating`, `dockworker:needs-info`, `dockworker:in-progress`, `dockworker:pr-open`, `dockworker:done`, `dockworker:failed`, `dockworker:skip` |
-| `app_id` | *(Optional)* GitHub App ID — enables posting as a bot identity instead of your personal account. Installations are auto-discovered at runtime. |
-| `issue_work_window_start` | *(Optional)* Hour (24h format) when issue processing begins. Omit to run 24/7. |
-| `issue_work_window_end` | *(Optional)* Hour (24h format) when issue processing stops. Omit to run 24/7. |
-
-### Cron Schedule
-
-Edit `crontab` to change the polling interval. The container timezone is set to `America/Chicago` in the Dockerfile — adjust `ln -sf /usr/share/zoneinfo/...` for a different timezone. The issue work window is configured in `config.yaml`, not the crontab.
-
-A token keep-alive job runs every 6 hours to prevent OAuth token expiry.
-
-### SSH Port
-
-The container binds to `127.0.0.1:41922` by default (localhost only, not exposed to LAN). Change the port mapping in `docker-compose.yml` if needed.
+| `feature.yaml` | **Required.** Name, description, dependencies |
+| `Dockerfile.snippet` | Apt packages, pip installs, SDK setup |
+| `settings.snippet.json` | Claude Code permissions for feature-specific commands |
+| `config.snippet.yaml.example` | User-configurable settings (copied to `.yaml` on first assemble) |
+| `crontab.snippet` | Scheduled tasks |
+| `entrypoint.d/*.sh` | Boot-time initialization (numbered for ordering) |
+| `setup.md` | Manual setup steps (included by `/setup`) |
+| `scripts/` | Scripts copied into the container |
 
 ## Troubleshooting
 
-**Container keeps restarting:** Check `docker compose logs`. Most commonly caused by CRLF line endings in `entrypoint.sh` — the `.gitattributes` file prevents this when cloning via git.
+**Container keeps restarting:** Check `docker compose logs`. Most commonly caused by CRLF line endings in shell scripts — the `.gitattributes` file prevents this when cloning via git.
 
-**Claude Code can't use tools:** Verify `/root/.claude/settings.json` has the permissions allowlist. Claude Code in `-p` (print) mode blocks tool use by default.
+**Claude Code can't use tools:** Verify `/root/.claude/settings.json` has the permissions allowlist. Run `bash build/assemble.sh` to regenerate it from core + feature snippets.
 
-**Duplicate comments:** Claude posts its own replies via `gh`. The automation scripts no longer post comments for the comment monitor — only Claude does. If you see duplicates, check that an older version of the scripts isn't running.
+**Stale locks blocking runs:** The entrypoint clears lock files and WIP state on boot. If the worker hangs mid-run, restart the container or manually delete lock files inside the container.
+
+**Auth token expired:** A cron keep-alive job runs every 6 hours to prevent this. If it still happens, SSH in and run `claude auth login --headless` again.
 
 **Git push fails:** Run `gh auth setup-git` inside the container. The entrypoint runs this on boot, but it requires `gh auth login` to have been completed first.
-
-**Stale locks blocking runs:** The entrypoint clears lock files and WIP state on boot. If the worker hangs mid-run, restart the container or manually delete files in `/root/workspace/.issue-worker/locks/` and `/root/workspace/.issue-worker/state/wip.json`.
-
-**Auth token expired:** The cron keep-alive job should prevent this, but if it happens, SSH in and run `claude auth login --headless` again.
