@@ -1,19 +1,61 @@
-Create a new feature for the Claude Docker Worker. Walk through the steps below
-interactively, gathering input from the user and scaffolding the feature directory.
+Create a new feature for the Claude Docker Worker. Have a conversation with the
+user to understand what they want, then scaffold everything for them.
 
-## 1. Gather Feature Details
+## 1. Understand What the User Wants
 
-Ask the user:
+Ask the user to describe what they want this feature to do. Examples:
 
-- **Feature name** (kebab-case, used as the directory name — e.g., `flutter-dev`, `angular-cli`, `rust-toolchain`)
-- **Display name** (human-readable — e.g., "Flutter Development Environment")
-- **Description** (one sentence explaining what the feature adds)
-- **Does it depend on other features?** (list feature names, or none)
+- "I want the container to be able to do Flutter development"
+- "I need Rust with cargo and clippy"
+- "I want a scheduled script that checks my deploy status"
+- "I need the container to work with AWS CLI"
 
-## 2. Scaffold the Feature Directory
+From their description, figure out:
 
-Create `features/<name>/` with the following files. Every file below is optional
-except `feature.yaml` — only create the ones the user needs. Ask which apply.
+- A good kebab-case name for the feature directory (e.g., `flutter-dev`, `rust-toolchain`, `aws-cli`)
+- A human-readable display name
+- A one-line description
+
+Confirm these with the user before proceeding.
+
+## 2. Research and Plan
+
+Based on what the user described, determine what the feature needs. Research
+installation methods (official docs, apt packages, curl installers, pip packages)
+as needed. Consider:
+
+- **What tools need to be installed?** System packages, SDKs, CLIs, language
+  runtimes, pip/npm packages, or tools installed via curl/wget.
+
+- **What commands should Claude Code be able to run?** Any CLI tools the feature
+  installs need to be added to the permissions allowlist so Claude can use them.
+
+- **Does it need runtime configuration?** Settings that vary per user/machine
+  (API keys, project paths, account IDs, etc.) belong in a config file. Static
+  tool installations typically don't need config.
+
+- **Does it run on a schedule?** Automated workers, pollers, or periodic tasks
+  need cron entries. Dev environment features typically don't.
+
+- **Does it need boot-time setup?** Features that maintain state across restarts
+  (logs, locks, state files) need an entrypoint hook to initialize directories.
+  Simple tool installations typically don't.
+
+- **Does it require manual setup steps?** Things like authenticating external
+  services, copying credentials, or creating accounts need documented setup steps.
+
+- **Does it need custom scripts?** Automation features need scripts that run
+  inside the container. Dev environment features typically just install tools.
+
+Present a short summary of what you'll create and why. Don't reference file
+conventions — describe it in terms of what the feature will do.
+
+## 3. Scaffold the Feature
+
+Read the existing features in `features/` to match the conventions. Then create
+the feature directory and all necessary files.
+
+Reference for the file conventions (the user doesn't need to know these details):
 
 ### feature.yaml (always created)
 
@@ -25,117 +67,67 @@ depends_on: []
 install_dir: /opt/<name>
 ```
 
-### Dockerfile.snippet
+### Dockerfile.snippet (when tools need installing)
 
-Ask: "Does this feature need system packages, SDKs, or tools installed in the
-container?" If yes, help the user write the Dockerfile fragment.
+Common patterns:
+- Apt packages: `RUN apt-get update && apt-get install -y <packages> && rm -rf /var/lib/apt/lists/*`
+- Pip packages: `RUN pip3 install --break-system-packages <packages>`
+- External installers: `RUN curl -fsSL <url> | bash`
+- Copying scripts: `COPY features/<name>/scripts/ /opt/<name>/` then `RUN chmod +x /opt/<name>/*.sh`
+- Python modules: `ENV PYTHONPATH="/opt/<name>:${PYTHONPATH:-}"`
 
-Common patterns from existing features:
-
-- **Apt packages**: `RUN apt-get update && apt-get install -y <packages> && rm -rf /var/lib/apt/lists/*`
-- **Pip packages**: `RUN pip3 install --break-system-packages <packages>`
-- **External installers**: `RUN curl -fsSL <url> | bash`
-- **Copying scripts**: `COPY features/<name>/scripts/ /opt/<name>/` followed by `RUN chmod +x /opt/<name>/*.sh`
-
-If the feature adds a Python module, set PYTHONPATH:
-```dockerfile
-ENV PYTHONPATH="/opt/<name>:${PYTHONPATH:-}"
-```
-
-### settings.snippet.json
-
-Ask: "Does this feature need Claude Code to run any new commands?" If yes,
-create a snippet adding those permissions. Follow the pattern:
+### settings.snippet.json (when Claude needs to run new commands)
 
 ```json
 {
   "permissions": {
-    "allow": [
-      "Bash(flutter *)",
-      "Bash(dart *)"
-    ],
+    "allow": ["Bash(tool_name *)"],
     "deny": []
   }
 }
 ```
 
-Only include permissions this feature specifically needs — base permissions
-(git, file operations, etc.) are already in `core/settings.json.base`.
+Base permissions (git, file ops, etc.) are already in `core/settings.json.base`.
 
-### config.snippet.yaml.example
+### config.snippet.yaml.example (when there are user-configurable settings)
 
-Ask: "Does this feature have user-configurable settings?" If yes, create the
-example config file with sensible defaults and comments explaining each option.
-This file is committed to the repo. Users will get a copy at
-`config.snippet.yaml` (gitignored) when they run `assemble.sh`.
+Committed to the repo. Users get a working copy at `config.snippet.yaml`
+(gitignored) when they run `assemble.sh`.
 
-### crontab.snippet
+### crontab.snippet (when there are scheduled tasks)
 
-Ask: "Does this feature need scheduled tasks?" If yes, write cron entries.
 Use `bash -l` to ensure PATH includes Claude Code:
-
 ```
 */10 * * * * /bin/bash -l -c '/opt/<name>/some-script.sh' >> /root/workspace/.<name>/logs/cron.log 2>&1
 ```
 
-### entrypoint.d/<NN>-<name>.sh
+### entrypoint.d/<NN>-<name>.sh (when boot-time init is needed)
 
-Ask: "Does this feature need initialization at container boot?" If yes, create
-a boot script. Use a number prefix for ordering (10 = early init, 20 = config,
-30 = services). Common tasks:
-
-- Create state/log directories on the persistent volume
-- Initialize state files
-- Clean up stale locks from previous runs
-- Validate configuration
-
-Pattern from existing features:
-
+Number prefix controls ordering (10 = early, 20 = config, 30 = services):
 ```bash
 #!/bin/bash
 set -e
-
 STATE_BASE="/root/workspace/.<name>"
-
-mkdir -p "$STATE_BASE/state"
-mkdir -p "$STATE_BASE/logs"
-mkdir -p "$STATE_BASE/locks"
-mkdir -p "$STATE_BASE/workdir"
+mkdir -p "$STATE_BASE/state" "$STATE_BASE/logs" "$STATE_BASE/locks" "$STATE_BASE/workdir"
 ```
 
-### setup.md
+### setup.md (when manual setup steps are needed)
 
-Ask: "Does this feature require manual setup steps beyond config?" If yes,
-write feature-specific setup instructions. These are included by the master
-`/setup` command when this feature is enabled. Use step prefixes to avoid
-conflicts (e.g., `FL-1`, `FL-2` for a Flutter feature).
+Feature-specific setup instructions included by the master `/setup` command.
+Use step prefixes to avoid conflicts (e.g., `FL-1`, `FL-2`).
 
-Common setup steps:
-- Downloading credentials or keys
-- Authenticating external services
-- Running one-time initialization commands inside the container
+### scripts/ (when custom scripts run inside the container)
 
-### scripts/
+Scripts are copied to `/opt/<name>/` via the Dockerfile snippet.
 
-Ask: "Does this feature include scripts that run inside the container?" If yes,
-create the scripts directory and help write the scripts. Scripts are copied to
-`/opt/<name>/` in the container via the Dockerfile snippet.
+### README.md (always created)
 
-## 3. Enable the Feature
+A short readme explaining what the feature does, what tools are included,
+and any configuration or setup needed.
 
-Add the feature name to `features.conf` (uncommented).
+## 4. Enable and Test
 
-## 4. Test Assembly
-
-Run `bash build/assemble.sh` and verify:
-- No errors
-- The generated Dockerfile includes the feature's snippet
-- The generated settings.json includes the feature's permissions
-- The generated crontab includes the feature's cron entries (if any)
-- The generated config.yaml includes the feature's config (if any)
-- The entrypoint hook was collected (if any)
-
-Report the results and suggest next steps:
-- Edit `features/<name>/config.snippet.yaml` with real values (if config exists)
-- Run `bash build.sh` to build the image
-- Run `bash run.sh` to start the container
+1. Add the feature name to `features.conf`
+2. Run `bash build/assemble.sh`
+3. Verify no errors and that the generated files include the new feature
+4. Report results and suggest next steps (`bash build.sh` to build, `bash run.sh` to start)
