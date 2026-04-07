@@ -12,6 +12,12 @@ if [ -n "$SSH_AUTHORIZED_KEY" ]; then
     unset SSH_AUTHORIZED_KEY
 fi
 
+# Copy assembled settings.json onto the claude-config volume.
+# The image stages it at /opt/dockworker/ so it isn't shadowed by the volume mount.
+if [ -f /opt/dockworker/settings.json ]; then
+    cp /opt/dockworker/settings.json /root/.claude/settings.json
+fi
+
 # Configure git to use gh CLI for HTTPS authentication
 if command -v gh &> /dev/null && gh auth status &> /dev/null; then
     gh auth setup-git 2>/dev/null
