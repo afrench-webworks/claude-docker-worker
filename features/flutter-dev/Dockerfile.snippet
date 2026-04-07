@@ -42,6 +42,16 @@ RUN git clone --depth 1 --branch stable https://github.com/flutter/flutter.git "
 # Add Flutter, Dart, and Android tools to PATH
 ENV PATH="$FLUTTER_HOME/bin:$FLUTTER_HOME/bin/cache/dart-sdk/bin:$FLUTTER_HOME/.pub-cache/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
 
+# Persist PATH and env vars to shell init files so SSH/login shells pick them up
+RUN echo 'export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64' >> /root/.bashrc \
+    && echo 'export ANDROID_HOME=/opt/android-sdk' >> /root/.bashrc \
+    && echo 'export FLUTTER_HOME=/opt/flutter' >> /root/.bashrc \
+    && echo 'export PATH="$FLUTTER_HOME/bin:$FLUTTER_HOME/bin/cache/dart-sdk/bin:$FLUTTER_HOME/.pub-cache/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"' >> /root/.bashrc \
+    && echo 'export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64' >> /root/.profile \
+    && echo 'export ANDROID_HOME=/opt/android-sdk' >> /root/.profile \
+    && echo 'export FLUTTER_HOME=/opt/flutter' >> /root/.profile \
+    && echo 'export PATH="$FLUTTER_HOME/bin:$FLUTTER_HOME/bin/cache/dart-sdk/bin:$FLUTTER_HOME/.pub-cache/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"' >> /root/.profile
+
 # Pre-cache Flutter artifacts and run doctor
 RUN flutter precache \
     && flutter config --no-analytics \
