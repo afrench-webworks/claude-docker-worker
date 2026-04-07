@@ -14,6 +14,8 @@ Features are self-contained modules in `features/`. Enable the ones you want in 
 |---|---|
 | **[github-worker](features/github-worker/)** | Autonomous GitHub issue triage, implementation, and `@mention` response |
 | **[python-dev](features/python-dev/)** | Python development environment with pytest, black, ruff, mypy, poetry |
+| **[windows-exec](features/windows-exec/)** | Execute commands on the Windows host via SSH (MSBuild, .NET, etc.) |
+| **[flutter-dev](features/flutter-dev/)** | Flutter SDK with Dart and Android build tools for cross-platform development |
 
 Create your own with `claude` then `/new-feature`.
 
@@ -53,10 +55,9 @@ claude-docker-worker/
 │   │   ├── entrypoint.d/
 │   │   ├── setup.md
 │   │   └── scripts/            # Worker scripts, handlers, prompts
-│   └── python-dev/             # Python tooling feature
-│       ├── feature.yaml
-│       ├── Dockerfile.snippet
-│       └── settings.snippet.json
+│   ├── python-dev/
+│   ├── windows-exec/
+│   └── flutter-dev/
 ├── build/
 │   └── assemble.sh             # Composes core + features into build artifacts
 ├── .generated/                 # Output of assemble.sh (gitignored)

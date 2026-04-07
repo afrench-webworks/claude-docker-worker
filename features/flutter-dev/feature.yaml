@@ -1,0 +1,5 @@
+name: flutter-dev
+display_name: "Flutter Development"
+description: "Flutter SDK with Dart and Android build tools for cross-platform development"
+depends_on: []
+install_dir: /opt/flutter-dev
