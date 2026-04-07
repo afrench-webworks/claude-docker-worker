@@ -104,6 +104,9 @@ mkdir -p "$GENERATED_DIR/entrypoint.d"
     echo "RUN mkdir -p /root/.claude"
     echo "COPY .generated/settings.json /root/.claude/settings.json"
     echo ""
+    echo "# Project CLAUDE.md — assembled from core + feature snippets"
+    echo "COPY .generated/CLAUDE.md /root/workspace/CLAUDE.md"
+    echo ""
     echo "# Config — assembled from per-feature config snippets"
     echo "RUN mkdir -p /opt/dockworker"
     echo "COPY .generated/config.yaml /opt/dockworker/config.yaml"
@@ -235,6 +238,24 @@ if [[ $hook_count -eq 0 ]]; then
 fi
 
 echo "  Collected $hook_count entrypoint hooks"
+
+# ---------------------------------------------------------------------------
+# 6. Compose CLAUDE.md from core + feature snippets
+# ---------------------------------------------------------------------------
+
+{
+    cat "$PROJ_ROOT/CLAUDE.md"
+
+    for feat in "${ENABLED_FEATURES[@]}"; do
+        snippet="$FEATURES_DIR/$feat/claude.md.snippet"
+        if [[ -f "$snippet" ]]; then
+            echo ""
+            cat "$snippet"
+        fi
+    done
+} > "$GENERATED_DIR/CLAUDE.md"
+
+echo "  Generated CLAUDE.md"
 
 # ---------------------------------------------------------------------------
 # Copy generated Dockerfile to project root for docker compose build

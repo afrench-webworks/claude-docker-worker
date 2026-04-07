@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/opt/windows-exec/host-exec.sh *)"
+    ],
+    "deny": []
+  }
+}

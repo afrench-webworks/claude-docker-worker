@@ -6,6 +6,7 @@ features.conf
 
 # Generated build artifacts (output of build/assemble.sh)
 .generated/
+Dockerfile
 
 # Private keys
 *.pem

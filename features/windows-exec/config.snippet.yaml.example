@@ -1,0 +1,6 @@
+# Windows host connection settings
+windows_host:
+  hostname: "host.docker.internal"   # Docker Desktop resolves this to the host
+  port: 22                           # OpenSSH Server default port
+  user: ""                           # Windows username (required)
+  identity_file: "/root/.ssh/windows_host_ed25519"  # SSH private key for host auth

@@ -1,0 +1,5 @@
+name: windows-exec
+display_name: "Windows Host Execution"
+description: "Execute commands and programs on the Windows host machine via SSH"
+depends_on: []
+install_dir: /opt/windows-exec

@@ -1,0 +1,32 @@
+## Windows Host Execution
+
+This container can execute commands on the Windows host machine. Use this when
+a task requires Windows-specific tools, build systems, or programs that aren't
+available inside the Linux container.
+
+### How to use
+
+Run commands on the host with `/opt/windows-exec/host-exec.sh`:
+
+```bash
+# Run a command via PowerShell (default)
+/opt/windows-exec/host-exec.sh dotnet build MyProject.sln
+
+# Run a command via cmd.exe
+/opt/windows-exec/host-exec.sh --cmd msbuild /t:Build /p:Configuration=Release
+
+# Set a working directory on the host
+/opt/windows-exec/host-exec.sh --cwd "C:\Projects\MyApp" cargo build
+```
+
+### When to use
+
+Use `host-exec.sh` when:
+
+- A build requires a Windows-native tool (MSBuild, Visual Studio CLI, .NET SDK, etc.)
+- You need to run a program that only has a Windows version
+- The task references Windows paths or Windows-specific build steps
+- An issue or PR mentions tools that aren't installed in this container but likely exist on the host
+
+The host runs Windows and has its own set of installed tools. If a required tool
+isn't available inside this container, try the host before reporting it as missing.

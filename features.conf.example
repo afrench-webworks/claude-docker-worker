@@ -6,3 +6,6 @@ github-worker
 
 # Python Development Environment — pytest, black, ruff, mypy, ipython, virtualenv, poetry
 # python-dev
+
+# Windows Host Execution — run commands on the Windows host via SSH
+# windows-exec
