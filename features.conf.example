@@ -9,3 +9,6 @@ github-worker
 
 # Windows Host Execution — run commands on the Windows host via SSH
 # windows-exec
+
+# Flutter Development — Flutter SDK with Dart and Android build tools
+# flutter-dev
