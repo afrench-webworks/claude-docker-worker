@@ -231,7 +231,7 @@ def check_pr_lifecycle(gh: Github, repo_name: str, config: WorkerConfig) -> list
         return transitions
 
     # Load processed-issues state for PR URL lookups (open issues only)
-    state_file = Path("/root/workspace/.issue-worker/state/processed-issues.json")
+    state_file = Path("/root/workspace/.github-worker/state/processed-issues.json")
     processed_state = {}
     if state_file.exists():
         try:

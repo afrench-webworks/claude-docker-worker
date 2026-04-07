@@ -1,0 +1,2 @@
+# Unified worker — every 5 minutes, 24/7
+*/5 * * * * /bin/bash -l -c '/opt/github-worker/worker.sh' >> /root/workspace/.github-worker/logs/cron.log 2>&1

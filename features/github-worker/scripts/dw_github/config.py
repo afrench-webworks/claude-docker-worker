@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 import yaml
 
-DEFAULT_CONFIG_PATH = "/opt/issue-worker/config.yaml"
+DEFAULT_CONFIG_PATH = "/opt/dockworker/config.yaml"
 
 
 @dataclass

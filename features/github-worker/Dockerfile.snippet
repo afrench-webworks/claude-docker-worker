@@ -1,0 +1,21 @@
+# Python dependencies for the GitHub API module
+RUN pip3 install --break-system-packages PyGithub PyJWT cryptography pyyaml
+
+# GitHub CLI — official apt source
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update && apt-get install -y gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# GitHub worker scripts and Python module
+COPY features/github-worker/scripts/ /opt/github-worker/
+RUN chmod +x /opt/github-worker/*.sh /opt/github-worker/handlers/*.sh
+
+# Python module path — allows `python3 -m dw_github.cli` from anywhere
+ENV PYTHONPATH="/opt/github-worker"
+RUN echo 'export PYTHONPATH="/opt/github-worker"' >> /root/.bashrc \
+    && echo 'export PYTHONPATH="/opt/github-worker"' >> /root/.profile \
+    && echo 'PYTHONPATH=/opt/github-worker' >> /etc/environment

@@ -1,5 +1,11 @@
-# Machine-specific config (use config.yaml.example as template)
-config.yaml
+# Per-feature config (user-edited copies of .example files)
+**/config.snippet.yaml
+
+# Feature selection (use features.conf.example as template)
+features.conf
+
+# Generated build artifacts (output of build/assemble.sh)
+.generated/
 
 # Private keys
 *.pem

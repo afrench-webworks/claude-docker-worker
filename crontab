@@ -1,5 +1,0 @@
-# Token keep-alive — every 6 hours, triggers OAuth refresh before expiry
-0 */6 * * * /bin/bash -l -c 'claude --model opus -p "ping" > /dev/null 2>&1'
-
-# Unified worker — every 5 minutes, 24/7
-*/5 * * * * /bin/bash -l -c '/opt/issue-worker/worker.sh' >> /root/workspace/.issue-worker/logs/cron.log 2>&1

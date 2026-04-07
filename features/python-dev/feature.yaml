@@ -1,0 +1,5 @@
+name: python-dev
+display_name: "Python Development Environment"
+description: "Python development tooling including pip, venv, pytest, linters, and common utilities"
+depends_on: []
+install_dir: /opt/python-dev

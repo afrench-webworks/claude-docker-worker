@@ -23,13 +23,7 @@
       "Bash(npx *)",
       "Bash(node *)",
       "Bash(which *)",
-      "Bash(echo *)",
-      "Bash(gh *)",
-      "Bash(python3 *)",
-      "Bash(pip3 *)",
-      "Bash(pytest *)",
-      "Bash(pip *)",
-      "Bash(python *)"
+      "Bash(echo *)"
     ],
     "deny": []
   }

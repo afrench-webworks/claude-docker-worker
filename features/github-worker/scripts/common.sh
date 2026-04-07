@@ -1,12 +1,12 @@
 #!/bin/bash
-# common.sh — Shared utilities for the issue worker system
+# common.sh — Shared utilities for the GitHub worker feature
 set -euo pipefail
 
-CONFIG_FILE="/opt/issue-worker/config.yaml"
-STATE_DIR="/root/workspace/.issue-worker/state"
-LOG_DIR="/root/workspace/.issue-worker/logs"
-LOCK_DIR="/root/workspace/.issue-worker/locks"
-WORK_DIR="/root/workspace/.issue-worker/workdir"
+CONFIG_FILE="/opt/dockworker/config.yaml"
+STATE_DIR="/root/workspace/.github-worker/state"
+LOG_DIR="/root/workspace/.github-worker/logs"
+LOCK_DIR="/root/workspace/.github-worker/locks"
+WORK_DIR="/root/workspace/.github-worker/workdir"
 REPO_CACHE_DIR="$WORK_DIR/repos"
 
 PROCESSED_ISSUES_FILE="$STATE_DIR/processed-issues.json"

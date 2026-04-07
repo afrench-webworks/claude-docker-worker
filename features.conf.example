@@ -1,0 +1,8 @@
+# features.conf — Enable features by uncommenting them (one per line)
+# Run `bash build/assemble.sh` after editing to regenerate build artifacts.
+
+# GitHub Issue/PR Worker — automated issue triage, implementation, and mention response
+github-worker
+
+# Python Development Environment — pytest, black, ruff, mypy, ipython, virtualenv, poetry
+# python-dev

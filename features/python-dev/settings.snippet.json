@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 *)",
+      "Bash(python *)",
+      "Bash(pip3 *)",
+      "Bash(pip *)",
+      "Bash(pytest *)",
+      "Bash(black *)",
+      "Bash(ruff *)",
+      "Bash(mypy *)",
+      "Bash(ipython *)",
+      "Bash(poetry *)",
+      "Bash(virtualenv *)"
+    ],
+    "deny": []
+  }
+}

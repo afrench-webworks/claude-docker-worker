@@ -13,7 +13,7 @@ from github.Repository import Repository
 
 from .config import WorkerConfig
 
-STATE_DIR = Path("/root/workspace/.issue-worker/state")
+STATE_DIR = Path("/root/workspace/.github-worker/state")
 HANDLED_MENTIONS_FILE = STATE_DIR / "handled-mentions.json"
 
 

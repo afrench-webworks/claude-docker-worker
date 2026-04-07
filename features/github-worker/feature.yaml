@@ -1,0 +1,5 @@
+name: github-worker
+display_name: "GitHub Issue/PR Worker"
+description: "Automated GitHub issue triage, implementation, and mention response"
+depends_on: []
+install_dir: /opt/github-worker
