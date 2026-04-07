@@ -30,6 +30,7 @@ get_config() {
     val=$(grep "^[[:space:]]*${key}:" "$CONFIG_FILE" 2>/dev/null \
         | head -1 \
         | sed 's/^[^:]*:[[:space:]]*//' \
+        | sed 's/[[:space:]]*#.*$//' \
         | sed 's/^"//' | sed 's/"$//' \
         | sed "s/^'//" | sed "s/'$//")
     if [[ -n "$val" ]]; then

@@ -32,10 +32,21 @@ Edit `features/windows-exec/config.snippet.yaml`:
 | `user` | Windows username | *(required)* |
 | `identity_file` | Path to SSH private key inside container | `/root/.ssh/windows_host_ed25519` |
 
-## Prerequisites
+## Setup
 
-- **Windows OpenSSH Server** enabled and running on the host
-- **SSH key pair** with the public key authorized on the host and the private key copied into the container
+Run the automated setup script from an **admin PowerShell**:
+
+```powershell
+.\features\windows-exec\setup-host.ps1                              # generate a new key
+.\features\windows-exec\setup-host.ps1 -KeyPath ~/.ssh/mykey        # use an existing key
+```
+
+This enables OpenSSH Server, configures sshd, handles key auth (with correct
+encoding and permissions), copies the key into the container, and detects your
+Windows username for the config.
+
+Prerequisites:
 - **Docker Desktop** for Windows (provides `host.docker.internal` DNS resolution)
+- An **admin PowerShell** to run the setup script
 
-See `setup.md` for step-by-step instructions.
+See `setup.md` for manual steps if preferred.
