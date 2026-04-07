@@ -37,8 +37,3 @@ git_bot_email: "claude-docker-worker@noreply.github.com"
 #   mention_reply:
 #     model: opus
 #     effort: high
-
-# Plugins — Claude Code plugins are auto-discovered from
-# ~/.claude/plugins/installed_plugins.json (on the claude-config volume).
-# Install plugins on your host machine, then restart the container.
-# Alternatively, volume-mount a host plugin directory into the container.
