@@ -138,6 +138,7 @@ _execute_issue_work() {
     git reset --hard "origin/$default_branch" 2>/dev/null
     git clean -fd 2>/dev/null
     git branch -D "$branch_name" 2>/dev/null || true
+    git push origin --delete "$branch_name" 2>/dev/null || true
     git checkout -b "$branch_name"
 
     # Fetch full issue context via Python module

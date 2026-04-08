@@ -175,7 +175,7 @@ ensure_repo_clone() {
     if [[ -d "$repo_dir/.git" ]]; then
         if [[ "$fresh" == "true" ]]; then
             cd "$repo_dir"
-            git fetch origin 2>&1 || {
+            git fetch origin --prune 2>&1 || {
                 echo "[$(date -Iseconds)] ERROR: Failed to fetch $repo"
                 cd - > /dev/null
                 return 1

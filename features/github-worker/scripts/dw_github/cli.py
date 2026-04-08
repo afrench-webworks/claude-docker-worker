@@ -105,6 +105,19 @@ def cmd_check_pr_lifecycle(args: argparse.Namespace) -> None:
     print(json.dumps({"status": "ok", "transitions": transitions}))
 
 
+def cmd_process_resets(args: argparse.Namespace) -> None:
+    """Process issues with dockworker:reset label — strip labels and return issue numbers."""
+    config = load_config()
+    factory = GitHubClientFactory(config)
+    owner = args.repo.split("/")[0]
+    gh = factory.get_client(owner)
+
+    from .issues import process_resets
+
+    resets = process_resets(gh, args.repo, config)
+    print(json.dumps({"status": "ok", "resets": resets}))
+
+
 def cmd_ensure_labels(args: argparse.Namespace) -> None:
     """Ensure all dockworker:* labels exist in a repo."""
     config = load_config()
@@ -204,6 +217,14 @@ def cmd_mark_mention_handled(args: argparse.Namespace) -> None:
     print(json.dumps({"status": "ok"}))
 
 
+def cmd_prune_mentions(args: argparse.Namespace) -> None:
+    """Prune handled-mention entries older than 30 days."""
+    from .mentions import prune_handled_mentions
+
+    removed = prune_handled_mentions()
+    print(json.dumps({"status": "ok", "removed": removed}))
+
+
 def cmd_mark_issue(args: argparse.Namespace) -> None:
     """Transition an issue's label state."""
     config = load_config()
@@ -260,6 +281,10 @@ def main() -> None:
     p = sub.add_parser("check-pr-lifecycle", help="Transition pr-open issues to done if PR merged/closed")
     p.add_argument("--repo", required=True)
 
+    # process-resets
+    p = sub.add_parser("process-resets", help="Process dockworker:reset labels")
+    p.add_argument("--repo", required=True)
+
     # ensure-labels
     p = sub.add_parser("ensure-labels", help="Ensure dockworker labels exist")
     p.add_argument("--repo", required=True)
@@ -299,6 +324,9 @@ def main() -> None:
     p = sub.add_parser("mark-mention-handled", help="Mark mention as handled")
     p.add_argument("--mention-id", required=True)
 
+    # prune-mentions
+    sub.add_parser("prune-mentions", help="Prune handled-mention entries older than 30 days")
+
     # mark-issue
     p = sub.add_parser("mark-issue", help="Transition issue label state")
     p.add_argument("--repo", required=True)
@@ -315,6 +343,7 @@ def main() -> None:
         "find-unevaluated": cmd_find_unevaluated,
         "check-active": cmd_check_active,
         "check-pr-lifecycle": cmd_check_pr_lifecycle,
+        "process-resets": cmd_process_resets,
         "ensure-labels": cmd_ensure_labels,
         "comment": cmd_comment,
         "label": cmd_label,
@@ -322,6 +351,7 @@ def main() -> None:
         "issue-context": cmd_issue_context,
         "mention-context": cmd_mention_context,
         "mark-mention-handled": cmd_mark_mention_handled,
+        "prune-mentions": cmd_prune_mentions,
         "mark-issue": cmd_mark_issue,
     }
 

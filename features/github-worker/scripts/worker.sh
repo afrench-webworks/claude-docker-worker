@@ -36,8 +36,52 @@ for repo in "${REPOS[@]}"; do
         continue
     }
 
-    # Lifecycle check: transition pr-open → done when PRs are merged/closed
-    $GITHUB_CLI check-pr-lifecycle --repo "$repo" 2>/dev/null || true
+    # Reset check: strip all dockworker state from issues with dockworker:reset
+    reset_result=$($GITHUB_CLI process-resets --repo "$repo" 2>/dev/null) || true
+    if [[ -n "$reset_result" ]]; then
+        for issue_num in $(echo "$reset_result" | jq -r '.resets[].issue // empty' 2>/dev/null); do
+            state_key="${repo}#${issue_num}"
+            if [[ -f "$PROCESSED_ISSUES_FILE" ]]; then
+                tmp="${PROCESSED_ISSUES_FILE}.tmp"
+                jq --arg k "$state_key" 'del(.[$k])' "$PROCESSED_ISSUES_FILE" > "$tmp" && mv "$tmp" "$PROCESSED_ISSUES_FILE"
+            fi
+            # Delete stale remote branch so the next implementation attempt doesn't conflict
+            branch_name="claude/issue-${issue_num}"
+            repo_dir="$REPO_CACHE_DIR/$(echo "$repo" | tr '/' '-')"
+            if [[ -d "$repo_dir/.git" ]]; then
+                git -C "$repo_dir" push origin --delete "$branch_name" 2>/dev/null || true
+            fi
+            echo "[$(date -Iseconds)] Reset: cleared state for $state_key"
+        done
+    fi
+
+    # Lifecycle check: transition pr-open → done/failed when PRs are merged/closed
+    lifecycle_result=$($GITHUB_CLI check-pr-lifecycle --repo "$repo" 2>/dev/null) || true
+    if [[ -n "$lifecycle_result" ]]; then
+        for row in $(echo "$lifecycle_result" | jq -c '.transitions[]' 2>/dev/null); do
+            issue_num=$(echo "$row" | jq -r '.issue')
+            status=$(echo "$row" | jq -r '.status')
+            state_key="${repo}#${issue_num}"
+
+            # Clean up branches for completed/failed work
+            branch_name="claude/issue-${issue_num}"
+            repo_dir="$REPO_CACHE_DIR/$(echo "$repo" | tr '/' '-')"
+            if [[ -d "$repo_dir/.git" ]]; then
+                git -C "$repo_dir" branch -D "$branch_name" 2>/dev/null || true
+                git -C "$repo_dir" push origin --delete "$branch_name" 2>/dev/null || true
+            fi
+
+            # Clear processed-issues state for done work (no longer needed)
+            if [[ "$status" == "merged" || "$status" == "closed" || "$status" == "closed-without-merge" ]]; then
+                if [[ -f "$PROCESSED_ISSUES_FILE" ]]; then
+                    tmp="${PROCESSED_ISSUES_FILE}.tmp"
+                    jq --arg k "$state_key" 'del(.[$k])' "$PROCESSED_ISSUES_FILE" > "$tmp" && mv "$tmp" "$PROCESSED_ISSUES_FILE"
+                fi
+            fi
+
+            echo "[$(date -Iseconds)] Lifecycle: $state_key → $status (cleaned up)"
+        done
+    fi
 
     # --- WIP-gated handlers (mentions, issue implementation) ---
     for handler in "${HANDLERS[@]}"; do
@@ -80,3 +124,7 @@ for repo in "${REPOS[@]}"; do
         continue
     fi
 done
+
+# --- Global cleanup (runs once per cycle, not per-repo) ---
+# Prune handled-mention entries older than 30 days
+$GITHUB_CLI prune-mentions 2>/dev/null || true

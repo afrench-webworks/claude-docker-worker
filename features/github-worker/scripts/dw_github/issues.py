@@ -8,6 +8,7 @@ Implements the dockworker:* label system:
 - dockworker:done        → completed
 - dockworker:failed      → work failed
 - dockworker:skip        → not suitable for AI
+- dockworker:reset       → clear all state and re-evaluate
 
 Per-repo concurrency for implementation work: if any issue has in-progress or
 pr-open, skip new implementation. Evaluation/triage can still run.
@@ -211,11 +212,11 @@ def mark_evaluated(
 
 
 def check_pr_lifecycle(gh: Github, repo_name: str, config: WorkerConfig) -> list[dict]:
-    """Check issues with dockworker:pr-open and transition to done if the PR is merged/closed.
+    """Check issues with dockworker:pr-open and transition based on PR state.
 
     Finds all open issues with the pr-open label, looks for a linked PR
     (via the processed-issues state or by scanning for a claude/issue-N branch PR),
-    and if that PR is merged or closed, transitions the issue to dockworker:done.
+    and transitions: merged → dockworker:done, closed without merge → dockworker:failed.
 
     Returns a list of transitions made (for logging).
     """
@@ -263,17 +264,62 @@ def check_pr_lifecycle(gh: Github, repo_name: str, config: WorkerConfig) -> list
             if pr is None:
                 continue
 
-            if pr.merged or pr.state == "closed":
+            if pr.merged:
                 add_label(issue, config.label("done"))
                 remove_label(issue, config.label("pr-open"))
-                status = "merged" if pr.merged else "closed"
                 transitions.append({
                     "issue": issue.number,
                     "pr": pr.number,
-                    "status": status,
+                    "status": "merged",
+                })
+            elif pr.state == "closed":
+                add_label(issue, config.label("failed"))
+                remove_label(issue, config.label("pr-open"))
+                transitions.append({
+                    "issue": issue.number,
+                    "pr": pr.number,
+                    "status": "closed-without-merge",
                 })
 
     return transitions
+
+
+def process_resets(gh: Github, repo_name: str, config: WorkerConfig) -> list[dict]:
+    """Find issues with dockworker:reset and strip all dockworker state.
+
+    For each open issue with the reset label:
+    1. Remove ALL dockworker:* labels (including reset itself)
+    2. Post a comment noting the reset
+
+    Returns a list of {"issue": N} dicts so the caller can clear state files
+    and delete stale remote branches.
+    """
+    repo = gh.get_repo(repo_name)
+    reset_label = config.label("reset")
+    resets = []
+
+    try:
+        label_obj = repo.get_label(reset_label)
+    except Exception:
+        return resets
+
+    for issue in repo.get_issues(state="open", labels=[label_obj]):
+        if issue.pull_request:
+            continue
+
+        # Remove every dockworker:* label
+        for label_name in get_dockworker_labels(issue, config):
+            remove_label(issue, label_name)
+
+        issue.create_comment(
+            f"All dockworker labels and state have been cleared. "
+            f"This issue will be re-evaluated on the next worker cycle.\n\n"
+            f"{config.bot_signature}"
+        )
+
+        resets.append({"issue": issue.number})
+
+    return resets
 
 
 def _find_linked_pr(repo, repo_name: str, issue_number: int, processed: dict):

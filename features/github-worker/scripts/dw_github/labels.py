@@ -16,6 +16,7 @@ LABELS = [
     ("done", "cccccc", "Completed successfully"),
     ("failed", "d93f0b", "Work attempt failed"),
     ("skip", "ffffff", "Not suitable for AI work"),
+    ("reset", "e36209", "Reset issue — clear all dockworker state and re-evaluate"),
 ]
 
 

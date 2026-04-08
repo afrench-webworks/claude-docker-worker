@@ -183,6 +183,43 @@ def mark_mention_handled(mention_id: str) -> None:
     HANDLED_MENTIONS_FILE.write_text(json.dumps(handled))
 
 
+def prune_handled_mentions(max_age_days: int = 30) -> int:
+    """Remove handled-mention entries older than max_age_days.
+
+    Once a PR/issue is closed, its mention IDs will never be scanned again
+    (collect_mentions only queries state="open"). Entries older than the
+    threshold are safe to delete — they're either from closed items or from
+    open items that would produce fresh entries on the next scan.
+
+    Returns the number of entries removed.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    handled = _load_handled()
+    if not handled:
+        return 0
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    to_keep = {}
+    removed = 0
+
+    for mention_id, timestamp_str in handled.items():
+        try:
+            ts = datetime.fromisoformat(timestamp_str)
+            if ts >= cutoff:
+                to_keep[mention_id] = timestamp_str
+            else:
+                removed += 1
+        except (ValueError, TypeError):
+            # Malformed timestamp — keep the entry to be safe
+            to_keep[mention_id] = timestamp_str
+
+    if removed > 0:
+        HANDLED_MENTIONS_FILE.write_text(json.dumps(to_keep))
+
+    return removed
+
+
 def build_context(gh: Github, repo_name: str, mention: Mention) -> dict:
     """Assemble full context for a mention response."""
     repo = gh.get_repo(repo_name)
